@@ -3,7 +3,7 @@
 import { memo, Suspense } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Calendar } from 'lucide-react';
-import TimeHubApp from './time-hub-app';
+import TimeHubApp from '@/app/time-hub-app';
 
 /** 読み込み中のフェードイン表示 */
 const LoadingFallback = memo(function LoadingFallback() {

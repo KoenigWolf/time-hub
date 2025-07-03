@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, memo } from 'react';
+import Link from 'next/link';
 import { usePollData } from '@/hooks/use-poll-data';
 import { getBestDateTimes, hasValidCandidates } from '@/lib/poll-utils';
 import { PollShareDialog } from '@/components/poll-share-dialog';
@@ -47,9 +48,12 @@ const TimeHubApp = memo(function TimeHubApp() {
       <div className="max-w-6xl mx-auto p-6 space-y-8">
         {/* ヘッダー */}
         <header className="text-center space-y-4 py-8">
-          <h1 className="text-3xl font-light text-gray-900 tracking-wide">
+          <Link 
+            href="/" 
+            className="inline-block text-3xl font-light text-gray-900 tracking-wide hover:text-blue-600 transition-colors cursor-pointer"
+          >
             time-hub
-          </h1>
+          </Link>
           <p className="text-gray-500 font-light">シンプルな日程調整</p>
         </header>
 
