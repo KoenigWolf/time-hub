@@ -27,23 +27,15 @@ const TimeHubApp = memo(function TimeHubApp() {
     getShareUrl,
   } = usePollData();
 
-  const bestDateTimes = getBestDateTimes(pollData);
-  const hasCandidates = hasValidCandidates(pollData.candidates);
-  const showEmptyState = pollData.users.length === 0 && !hasCandidates && !pollData.title;
-  const isCreated = hasCandidates && pollData.title;
-
-  // SSR対策: 初回マウント前は何も表示しない
-  if (!mounted) return null;
-
   // イベント作成完了時の処理
-  const handleCreationComplete = () => {
+  const handleCreationComplete = useCallback(() => {
     setIsCreationMode(false);
-  };
+  }, []);
 
   // 新規作成モードの開始
-  const handleStartCreation = () => {
+  const handleStartCreation = useCallback(() => {
     setIsCreationMode(true);
-  };
+  }, []);
 
   // トップページへの確実な遷移処理
   const handleGoToTop = useCallback((e: React.MouseEvent | React.KeyboardEvent) => {
@@ -72,6 +64,15 @@ const TimeHubApp = memo(function TimeHubApp() {
       handleGoToTop(e);
     }
   }, [handleGoToTop]);
+
+  // 計算された値（フック呼び出し後）
+  const bestDateTimes = getBestDateTimes(pollData);
+  const hasCandidates = hasValidCandidates(pollData.candidates);
+  const showEmptyState = pollData.users.length === 0 && !hasCandidates && !pollData.title;
+  const isCreated = hasCandidates && pollData.title;
+
+  // SSR対策: 初回マウント前は何も表示しない（フック呼び出し後の早期return）
+  if (!mounted) return null;
 
   return (
     <div className="min-h-screen bg-white">
