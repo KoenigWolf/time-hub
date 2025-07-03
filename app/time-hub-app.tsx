@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, memo } from 'react';
+import { useState, memo, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { usePollData } from '@/hooks/use-poll-data';
 import { getBestDateTimes, hasValidCandidates } from '@/lib/poll-utils';
 import { PollShareDialog } from '@/components/poll-share-dialog';
@@ -14,6 +15,7 @@ import { EmptyState } from '@/components/empty-state';
 const TimeHubApp = memo(function TimeHubApp() {
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [isCreationMode, setIsCreationMode] = useState(false);
+  const router = useRouter();
   
   const {
     pollData,
@@ -43,6 +45,34 @@ const TimeHubApp = memo(function TimeHubApp() {
     setIsCreationMode(true);
   };
 
+  // トップページへの確実な遷移処理
+  const handleGoToTop = useCallback((e: React.MouseEvent | React.KeyboardEvent) => {
+    e.preventDefault();
+    console.log('Navigating to top page...');
+    
+    // 現在のURLをログ出力
+    console.log('Current path:', window.location.pathname);
+    
+    // 強制的にトップページに遷移
+    router.push('/');
+    
+    // フォールバック: window.locationも使用
+    setTimeout(() => {
+      console.log('Checking navigation result:', window.location.pathname);
+      if (window.location.pathname !== '/') {
+        console.log('Router.push failed, using window.location...');
+        window.location.href = '/';
+      }
+    }, 100);
+  }, [router]);
+
+  // キーボードイベント用のハンドラ
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      handleGoToTop(e);
+    }
+  }, [handleGoToTop]);
+
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-6xl mx-auto p-6 space-y-8">
@@ -50,7 +80,12 @@ const TimeHubApp = memo(function TimeHubApp() {
         <header className="text-center space-y-4 py-8">
           <Link 
             href="/" 
-            className="inline-block text-3xl font-light text-gray-900 tracking-wide hover:text-blue-600 transition-colors cursor-pointer"
+            onClick={handleGoToTop}
+            onKeyDown={handleKeyDown}
+            className="inline-block text-3xl font-light text-gray-900 tracking-wide hover:text-blue-600 transition-colors cursor-pointer select-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded-md px-2 py-1"
+            tabIndex={0}
+            role="button"
+            aria-label="トップページに戻る"
           >
             time-hub
           </Link>
