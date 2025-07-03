@@ -9,7 +9,6 @@ import { PollShareDialog } from '@/components/poll-share-dialog';
 import { EventCreationWizard } from '@/components/event-creation-wizard';
 import { DateTimeAnswerForm } from '@/components/datetime-answer-form';
 import { DateTimeResultsTable } from '@/components/datetime-results-table';
-import { EmptyState } from '@/components/empty-state';
 
 /** time-hub メインアプリ本体 */
 const TimeHubApp = memo(function TimeHubApp() {
@@ -78,7 +77,7 @@ const TimeHubApp = memo(function TimeHubApp() {
     <div className="min-h-screen bg-white">
       <div className="max-w-6xl mx-auto p-6 space-y-8">
         {/* ヘッダー */}
-        <header className="text-center space-y-4 py-8">
+        <header className="text-center space-y-6 py-8">
           <Link 
             href="/" 
             onClick={handleGoToTop}
@@ -91,6 +90,18 @@ const TimeHubApp = memo(function TimeHubApp() {
             time-hub
           </Link>
           <p className="text-gray-500 font-light">シンプルな日程調整</p>
+          
+          {/* 新規作成ボタン - EmptyState時のみ表示 */}
+          {showEmptyState && (
+            <div className="pt-4">
+              <button
+                onClick={handleStartCreation}
+                className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm hover:shadow-md transform hover:scale-105 transition-transform"
+              >
+                新しい日程調整を作成
+              </button>
+            </div>
+          )}
         </header>
 
         {/* 1. イベント作成フロー */}
@@ -143,15 +154,22 @@ const TimeHubApp = memo(function TimeHubApp() {
 
         {/* 5. 初期状態のガイド */}
         {showEmptyState && (
-          <div className="space-y-6">
-            <EmptyState />
-            <div className="text-center">
-              <button
-                onClick={handleStartCreation}
-                className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-              >
-                新しい日程調整を作成
-              </button>
+          <div className="text-center py-12">
+            <div className="max-w-md mx-auto space-y-6">
+              <div className="text-gray-400 mb-6">
+                <svg className="h-16 w-16 mx-auto" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm0 16H5V8h14v11z"/>
+                  <path d="M7 10h5v5H7z"/>
+                </svg>
+              </div>
+              <div className="space-y-3">
+                <h3 className="text-xl font-medium text-gray-900">
+                  日程調整を始めましょう
+                </h3>
+                <p className="text-gray-500">
+                  候補日を設定して、参加者から回答を集めることができます
+                </p>
+              </div>
             </div>
           </div>
         )}
