@@ -23,8 +23,9 @@ export const PollTitle = memo(function PollTitle({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      // Enterキーで入力を確定（フォーカスを外す）
-      if (e.key === 'Enter') {
+      // IME変換中はEnterでblurしない
+      if (e.key === 'Enter' && !(e.nativeEvent as any).isComposing) {
+        e.preventDefault();
         e.currentTarget.blur();
       }
     },

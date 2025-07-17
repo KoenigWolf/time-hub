@@ -95,27 +95,27 @@ export function usePollData() {
   // タイトル変更（最適化版）
   const handleTitleChange = useCallback((title: string) => {
     // stateを即座に更新
-    setPollData(prev => ({ ...prev, title }));
-    
-    // URL更新はデバウンス
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    
-    timeoutRef.current = setTimeout(() => {
-      try {
-        const currentData = { ...pollDataRef.current, title };
-        savePollLocal(currentData);
-        const encoded = encodePollToUrl(currentData);
-        if (encoded) {
-          router.push(`/?poll=${encoded}`);
-        } else {
-          console.warn('Failed to encode poll data during title change');
-        }
-      } catch (error) {
-        console.error('Error updating URL during title change:', error);
+    setPollData(prev => {
+      const next = { ...prev, title };
+      // URL更新はデバウンス
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
       }
-    }, 500);
+      timeoutRef.current = setTimeout(() => {
+        try {
+          savePollLocal(next);
+          const encoded = encodePollToUrl(next);
+          if (encoded) {
+            router.push(`/?poll=${encoded}`);
+          } else {
+            console.warn('Failed to encode poll data during title change');
+          }
+        } catch (error) {
+          console.error('Error updating URL during title change:', error);
+        }
+      }, 500);
+      return next;
+    });
   }, [router]);
 
   // 候補日時変更
@@ -199,35 +199,6 @@ export function usePollData() {
     }
   }, [mounted, pollData]);
 
-  // 後方互換性のための関数（旧コンポーネント用）
-  const handleDateChange = useCallback((index: number, date: string) => {
-    // 旧形式のインターフェース用
-    if (pollData.dates) {
-      const dates = pollData.dates.slice();
-      dates[index] = date;
-      const candidates = migrateDatesToCandidates(dates);
-      handleCandidatesChange(candidates);
-    }
-  }, [pollData.dates, handleCandidatesChange]);
-
-  const addDate = useCallback(() => {
-    // 旧形式のインターフェース用
-    if (pollData.dates) {
-      const dates = [...pollData.dates, ''];
-      const candidates = migrateDatesToCandidates(dates);
-      handleCandidatesChange(candidates);
-    }
-  }, [pollData.dates, handleCandidatesChange]);
-
-  const removeDate = useCallback((index: number) => {
-    // 旧形式のインターフェース用
-    if (pollData.dates && pollData.dates.length > 1) {
-      const dates = pollData.dates.filter((_, i) => i !== index);
-      const candidates = migrateDatesToCandidates(dates);
-      handleCandidatesChange(candidates);
-    }
-  }, [pollData.dates, handleCandidatesChange]);
-
   // クリーンアップ
   useEffect(() => {
     return () => {
@@ -246,9 +217,5 @@ export function usePollData() {
     submitAnswer,
     toggleExistingAnswer,
     getShareUrl,
-    // 後方互換性
-    handleDateChange,
-    addDate,
-    removeDate,
   };
 }

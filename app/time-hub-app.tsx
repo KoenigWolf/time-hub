@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, memo, useCallback } from 'react';
+import { useState, memo, useCallback, MouseEvent, KeyboardEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { usePollData } from '@/hooks/use-poll-data';
@@ -10,12 +10,21 @@ import { EventCreationWizard } from '@/components/event-creation-wizard';
 import { DateTimeAnswerForm } from '@/components/datetime-answer-form';
 import { DateTimeResultsTable } from '@/components/datetime-results-table';
 
-/** time-hub メインアプリ本体 */
+/**
+ * TimeHubApp: 日程調整アプリのエントリーポイント
+ * - 責務分離：各表示UI・イベントロジックを関数で分離
+ * - 可読性・保守性：詳細コメント付与、関数化で論理単位を明確化
+ * - 拡張性・型安全性：Props型やユーティリティ型で将来対応しやすく
+ * - アクセシビリティ：role/aria属性付与・tabIndex明示
+ * - テスト容易性：要素にdata-testidを付与しやすい設計
+ */
 const TimeHubApp = memo(function TimeHubApp() {
-  const [shareDialogOpen, setShareDialogOpen] = useState(false);
-  const [isCreationMode, setIsCreationMode] = useState(false);
+  // --- State ---
+  const [shareDialogOpen, setShareDialogOpen] = useState<boolean>(false);
+  const [isEditing, setIsEditing] = useState<boolean>(false); // 追加: 編集モード管理
   const router = useRouter();
-  
+
+  // --- Custom Hooks ---
   const {
     pollData,
     mounted,
@@ -26,86 +35,56 @@ const TimeHubApp = memo(function TimeHubApp() {
     getShareUrl,
   } = usePollData();
 
-  // イベント作成完了時の処理
-  const handleCreationComplete = useCallback(() => {
-    setIsCreationMode(false);
-  }, []);
-
-  // 新規作成モードの開始
-  const handleStartCreation = useCallback(() => {
-    setIsCreationMode(true);
-  }, []);
-
-  // トップページへの確実な遷移処理
-  const handleGoToTop = useCallback((e: React.MouseEvent | React.KeyboardEvent) => {
-    e.preventDefault();
-    console.log('Navigating to top page...');
-    
-    // 現在のURLをログ出力
-    console.log('Current path:', window.location.pathname);
-    
-    // 強制的にトップページに遷移
-    router.push('/');
-    
-    // フォールバック: window.locationも使用
-    setTimeout(() => {
-      console.log('Checking navigation result:', window.location.pathname);
-      if (window.location.pathname !== '/') {
-        console.log('Router.push failed, using window.location...');
-        window.location.href = '/';
-      }
-    }, 100);
-  }, [router]);
-
-  // キーボードイベント用のハンドラ
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      handleGoToTop(e);
-    }
-  }, [handleGoToTop]);
-
-  // 計算された値（フック呼び出し後）
+  // --- Utility values ---
   const bestDateTimes = getBestDateTimes(pollData);
   const hasCandidates = hasValidCandidates(pollData.candidates);
-  const showEmptyState = pollData.users.length === 0 && !hasCandidates && !pollData.title;
   const isCreated = hasCandidates && pollData.title;
 
-  // SSR対策: 初回マウント前は何も表示しない（フック呼び出し後の早期return）
+  // --- UIイベントハンドラ ---
+  /** トップページへ安全に遷移する */
+  const handleGoToTop = useCallback(
+    (e: MouseEvent | KeyboardEvent) => {
+      e.preventDefault();
+      router.push('/');
+      setTimeout(() => {
+        if (window.location.pathname !== '/') {
+          window.location.href = '/';
+        }
+      }, 100);
+    },
+    [router]
+  );
+
+  /** Enter/Space対応のキーボードハンドラ */
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        handleGoToTop(e);
+      }
+    },
+    [handleGoToTop]
+  );
+
+  /** イベント作成完了時のコールバック（拡張用） */
+  const handleCreationComplete = useCallback(() => {
+    setIsEditing(false); // 編集完了で結果表示へ
+  }, []);
+
+  /** 日程選択ページに戻る */
+  const handleBackToEdit = useCallback(() => {
+    setIsEditing(true); // 編集モードに戻す
+  }, []);
+
+  // --- SSR対策：初回マウント前は描画しない ---
   if (!mounted) return null;
 
+  // --- UI分割（JSX返却） ---
   return (
-    <div className="min-h-screen bg-white">
-      <div className="max-w-6xl mx-auto p-6 space-y-8">
-        {/* ヘッダー */}
-        <header className="text-center space-y-6 py-8">
-          <Link 
-            href="/" 
-            onClick={handleGoToTop}
-            onKeyDown={handleKeyDown}
-            className="inline-block text-3xl font-light text-gray-900 tracking-wide hover:text-blue-600 transition-colors cursor-pointer select-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded-md px-2 py-1"
-            tabIndex={0}
-            role="button"
-            aria-label="トップページに戻る"
-          >
-            time-hub
-          </Link>
-          <p className="text-gray-500 font-light">シンプルな日程調整</p>
-          
-          {/* 新規作成ボタン - EmptyState時のみ表示 */}
-          {showEmptyState && (
-            <div className="pt-4">
-              <button
-                onClick={handleStartCreation}
-                className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm hover:shadow-md transform hover:scale-105 transition-transform"
-              >
-                新しい日程調整を作成
-              </button>
-            </div>
-          )}
-        </header>
-
-        {/* 1. イベント作成フロー */}
-        {(isCreationMode || (!isCreated && !showEmptyState)) && (
+    <div className="flex flex-col min-h-screen bg-white">
+      <Header onGoToTop={handleGoToTop} onKeyDown={handleKeyDown} />
+      <main className="flex-1 w-full max-w-3xl mx-auto px-2 sm:px-4 md:px-6 py-2 sm:py-4 md:py-6">
+        {/* イベント作成フェーズ */}
+        {(!isCreated || isEditing) && (
           <EventCreationWizard
             title={pollData.title}
             candidates={pollData.candidates}
@@ -114,68 +93,20 @@ const TimeHubApp = memo(function TimeHubApp() {
             onComplete={handleCreationComplete}
           />
         )}
-
-        {/* 2. 作成完了後の表示 */}
-        {isCreated && !isCreationMode && (
-          <div className="space-y-8">
-            {/* イベント情報表示 */}
-            <div className="text-center space-y-3 py-6 border-b border-gray-100">
-              <h2 className="text-2xl font-medium text-gray-900">
-                {pollData.title}
-              </h2>
-              <p className="text-gray-600">
-                以下の候補日時から都合の良い時間を選択してください
-              </p>
-              {pollData.candidates.length > 0 && (
-                <div className="flex justify-center">
-                  <div className="text-sm text-gray-500 bg-gray-50 px-4 py-2 rounded-full">
-                    候補日: {pollData.candidates.length}日 ・ 
-                    候補時間: {pollData.candidates.reduce((sum, c) => sum + c.timeSlots.length, 0)}件
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 3. 回答入力フォーム */}
-            <DateTimeAnswerForm
-              candidates={pollData.candidates}
-              onSubmit={submitAnswer}
-            />
-
-            {/* 4. 集計結果表示 */}
-            <DateTimeResultsTable
-              pollData={pollData}
-              bestDateTimes={bestDateTimes}
-              onToggleAnswer={toggleExistingAnswer}
-              onShare={() => setShareDialogOpen(true)}
-            />
-          </div>
+        {/* イベント作成後フェーズ */}
+        {isCreated && !isEditing && (
+          <EventCreatedView
+            pollData={pollData}
+            bestDateTimes={bestDateTimes}
+            onBackToEdit={handleBackToEdit}
+            submitAnswer={submitAnswer}
+            toggleExistingAnswer={toggleExistingAnswer}
+            onShareDialogOpen={() => setShareDialogOpen(true)}
+          />
         )}
-
-        {/* 5. 初期状態のガイド */}
-        {showEmptyState && (
-          <div className="text-center py-12">
-            <div className="max-w-md mx-auto space-y-6">
-              <div className="text-gray-400 mb-6">
-                <svg className="h-16 w-16 mx-auto" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm0 16H5V8h14v11z"/>
-                  <path d="M7 10h5v5H7z"/>
-                </svg>
-              </div>
-              <div className="space-y-3">
-                <h3 className="text-xl font-medium text-gray-900">
-                  日程調整を始めましょう
-                </h3>
-                <p className="text-gray-500">
-                  候補日を設定して、参加者から回答を集めることができます
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* URL共有ダイアログ */}
+      </main>
+      <Footer />
+      {/* 共有ダイアログ */}
       <PollShareDialog
         isOpen={shareDialogOpen}
         onClose={() => setShareDialogOpen(false)}
@@ -187,3 +118,103 @@ const TimeHubApp = memo(function TimeHubApp() {
 });
 
 export default TimeHubApp;
+
+/**
+ * ヘッダー部（ロゴ・サブタイトル）
+ */
+interface HeaderProps {
+  onGoToTop: (e: MouseEvent | KeyboardEvent) => void;
+  onKeyDown: (e: KeyboardEvent) => void;
+}
+const Header = memo(function Header({ onGoToTop, onKeyDown }: HeaderProps) {
+  return (
+    <header className="w-full flex flex-col items-center justify-center py-2 sm:py-3 md:py-4 border-b border-gray-100 bg-white sticky top-0 z-20 shadow-sm">
+      <Link
+        href="/"
+        onClick={onGoToTop}
+        onKeyDown={onKeyDown}
+        className="text-2xl sm:text-3xl font-light text-gray-900 tracking-wide hover:text-blue-600 transition-colors cursor-pointer select-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded-md px-2 py-1"
+        tabIndex={0}
+        role="button"
+        aria-label="トップページに戻る"
+        data-testid="logo-link"
+      >
+        time-hub
+      </Link>
+      <p className="text-gray-500 font-light text-xs sm:text-sm mt-1">シンプルな日程調整</p>
+    </header>
+  );
+});
+
+/**
+ * フッター部
+ */
+const Footer = memo(function Footer() {
+  return (
+    <footer className="w-full flex items-center justify-center py-2 sm:py-3 md:py-4 border-t border-gray-100 bg-white text-xs text-gray-400 select-none">
+      <span>&copy; {new Date().getFullYear()} time-hub</span>
+    </footer>
+  );
+});
+
+/**
+ * イベント作成後画面の集約UI
+ */
+interface EventCreatedViewProps {
+  pollData: ReturnType<typeof usePollData>['pollData'];
+  bestDateTimes: ReturnType<typeof getBestDateTimes>;
+  onBackToEdit: () => void;
+  submitAnswer: (userName: string, answers: any) => void;
+  toggleExistingAnswer: (userIdx: number, flatIndex: number) => void;
+  onShareDialogOpen: () => void;
+}
+const EventCreatedView = memo(function EventCreatedView({
+  pollData,
+  bestDateTimes,
+  onBackToEdit,
+  submitAnswer,
+  toggleExistingAnswer,
+  onShareDialogOpen,
+}: EventCreatedViewProps) {
+  return (
+    <div className="space-y-8">
+      <section className="text-center space-y-3 py-6 border-b border-gray-100">
+        <h2 className="text-2xl font-medium text-gray-900">{pollData.title}</h2>
+        <p className="text-gray-600">
+          以下の候補日時から都合の良い時間を選択してください
+        </p>
+        {pollData.candidates.length > 0 && (
+          <div className="flex justify-center">
+            <div className="text-sm text-gray-500 bg-gray-50 px-4 py-2 rounded-full">
+              候補日: {pollData.candidates.length}日 ・
+              候補時間: {pollData.candidates.reduce((sum, c) => sum + c.timeSlots.length, 0)}件
+            </div>
+          </div>
+        )}
+      </section>
+
+      <div className="flex justify-end">
+        <button
+          onClick={onBackToEdit}
+          className="px-6 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors font-medium shadow-sm"
+          type="button"
+          aria-label="日程選択ページに戻る"
+          data-testid="back-to-edit-btn"
+        >
+          日程選択に戻る
+        </button>
+      </div>
+
+      <DateTimeAnswerForm
+        candidates={pollData.candidates}
+        onSubmit={(userName, answers) => submitAnswer(userName, answers)}
+      />
+      <DateTimeResultsTable
+        pollData={pollData}
+        bestDateTimes={bestDateTimes}
+        onToggleAnswer={(userIdx, flatIndex) => toggleExistingAnswer(userIdx, flatIndex)}
+        onShare={onShareDialogOpen}
+      />
+    </div>
+  );
+});

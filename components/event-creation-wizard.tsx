@@ -7,8 +7,15 @@ import { CalendarPicker } from './calendar-picker';
 import { TimeSlotEditor } from './time-slot-editor';
 import { PollTitle } from './poll-title';
 import { DateTimeCandidate, TimeSlot } from '@/lib/types';
-import { createDefaultTimeSlots } from '@/lib/calendar-utils';
+import { createDefaultTimeSlots, formatTimeSlot } from '@/lib/calendar-utils';
 import { Calendar, Clock, Share2 } from 'lucide-react';
+
+// プリセット時間帯
+const PRESET_TIME_SLOTS: { label: string; startTime: string; endTime: string }[] = [
+  { label: '午前', startTime: '09:00', endTime: '12:00' },
+  { label: '午後', startTime: '13:00', endTime: '17:00' },
+  { label: '夜', startTime: '18:00', endTime: '21:00' },
+];
 
 interface EventCreationWizardProps {
   title: string;
@@ -26,111 +33,135 @@ export const EventCreationWizard = memo(function EventCreationWizard({
   onCandidatesChange,
   onComplete,
 }: EventCreationWizardProps) {
-  const [currentStep, setCurrentStep] = useState<'title' | 'dates' | 'times'>('title');
+  // ステップ管理: 'dates' or 'times'
+  const [step, setStep] = useState<'dates' | 'times'>('dates');
 
-  // 選択済み日付の配列を取得
-  const selectedDates = candidates.map(c => c.date);
+  // 日付＋時間帯選択用ローカルstate
+  const [selectedDatesWithTimeSlots, setSelectedDatesWithTimeSlots] = useState<{
+    [date: string]: TimeSlot[];
+  }>(() => {
+    const initial: { [date: string]: TimeSlot[] } = {};
+    candidates.forEach(c => {
+      initial[c.date] = c.timeSlots;
+    });
+    return initial;
+  });
 
   // 今日以降の日付のみ選択可能
   const minDate = new Date().toISOString().slice(0, 10);
 
-  // 日付の選択/選択解除
+  // 日付の選択/選択解除（ローカルstateのみ）
   const handleDateToggle = useCallback((date: string) => {
-    const isSelected = selectedDates.includes(date);
-    
-    if (isSelected) {
-      // 日付を削除
-      const newCandidates = candidates.filter(c => c.date !== date);
-      onCandidatesChange(newCandidates);
-    } else {
-      // 日付を追加
-      const newCandidate: DateTimeCandidate = {
-        date,
-        timeSlots: createDefaultTimeSlots(),
-      };
-      const newCandidates = [...candidates, newCandidate].sort((a, b) => a.date.localeCompare(b.date));
-      onCandidatesChange(newCandidates);
-    }
-  }, [candidates, selectedDates, onCandidatesChange]);
+    setSelectedDatesWithTimeSlots(prev => {
+      const next = { ...prev };
+      if (next[date]) {
+        delete next[date];
+      } else {
+        next[date] = [];
+      }
+      return next;
+    });
+  }, []);
 
-  // 時間帯の変更
-  const handleTimeSlotsChange = useCallback((date: string, timeSlots: TimeSlot[]) => {
-    const newCandidates = candidates.map(candidate =>
-      candidate.date === date ? { ...candidate, timeSlots } : candidate
-    );
-    onCandidatesChange(newCandidates);
-  }, [candidates, onCandidatesChange]);
+  // 時間帯プリセット追加
+  const handleAddPresetTimeSlot = useCallback((date: string, preset: typeof PRESET_TIME_SLOTS[0]) => {
+    setSelectedDatesWithTimeSlots(prev => {
+      const next = { ...prev };
+      const exists = next[date]?.some(
+        slot => slot.startTime === preset.startTime && slot.endTime === preset.endTime
+      );
+      if (!exists) {
+        const newSlot: TimeSlot = {
+          id: `${date}-${preset.label}`,
+          startTime: preset.startTime,
+          endTime: preset.endTime,
+          label: preset.label,
+        };
+        next[date] = [...(next[date] || []), newSlot];
+      }
+      return next;
+    });
+  }, []);
 
-  // 日付の削除
-  const handleRemoveDate = useCallback((date: string) => {
-    const newCandidates = candidates.filter(c => c.date !== date);
-    onCandidatesChange(newCandidates);
-  }, [candidates, onCandidatesChange]);
+  // 時間帯プリセット削除
+  const handleRemovePresetTimeSlot = useCallback((date: string, preset: typeof PRESET_TIME_SLOTS[0]) => {
+    setSelectedDatesWithTimeSlots(prev => {
+      const next = { ...prev };
+      next[date] = (next[date] || []).filter(
+        slot => !(slot.startTime === preset.startTime && slot.endTime === preset.endTime)
+      );
+      return next;
+    });
+  }, []);
 
-  // ステップの進行
+  // 「次へ」ボタンでcandidatesに反映し、stepを進める
   const handleNext = useCallback(() => {
-    if (currentStep === 'title' && title.trim()) {
-      setCurrentStep('dates');
-    } else if (currentStep === 'dates' && selectedDates.length > 0) {
-      setCurrentStep('times');
-    } else if (currentStep === 'times') {
-      onComplete();
-    }
-  }, [currentStep, title, selectedDates.length, onComplete]);
+    // candidatesをローカル日付＋時間帯で上書き
+    const newCandidates = Object.entries(selectedDatesWithTimeSlots)
+      .filter(([date, slots]) => slots.length > 0)
+      .map(([date, slots]) => ({ date, timeSlots: slots }));
+    onCandidatesChange(newCandidates);
+    setStep('times');
+  }, [selectedDatesWithTimeSlots, onCandidatesChange]);
 
-  // ステップの戻る
-  const handleBack = useCallback(() => {
-    if (currentStep === 'times') {
-      setCurrentStep('dates');
-    } else if (currentStep === 'dates') {
-      setCurrentStep('title');
-    }
-  }, [currentStep]);
+  // 時間帯の変更（詳細エディタ用）
+  const handleTimeSlotsChange = useCallback((date: string, timeSlots: TimeSlot[]) => {
+    setSelectedDatesWithTimeSlots(prev => ({ ...prev, [date]: timeSlots }));
+    // onCandidatesChangeは「次へ」時のみ呼ぶ
+  }, []);
 
-  const canProceed = 
-    (currentStep === 'title' && title.trim()) ||
-    (currentStep === 'dates' && selectedDates.length > 0) ||
-    (currentStep === 'times');
+  // 日付の削除（時間帯設定画面用）
+  const handleRemoveDate = useCallback((date: string) => {
+    setSelectedDatesWithTimeSlots(prev => {
+      const next = { ...prev };
+      delete next[date];
+      return next;
+    });
+    // onCandidatesChangeは「次へ」時のみ呼ぶ
+  }, []);
+
+  // 完了ボタンの活性条件
+  const canComplete = title.trim() && candidates.length > 0 && candidates.every(c => c.timeSlots.length > 0);
+
+  // ステップ遷移のバリデーション
+  const canGoToTimes = Object.values(selectedDatesWithTimeSlots).some(slots => slots.length > 0);
+
+  // 選択中日付リスト
+  const selectedDates = Object.keys(selectedDatesWithTimeSlots);
 
   return (
-    <div className="space-y-6">
-      {/* プログレスインジケーター */}
+    <div className="space-y-8">
+      {/* ステップインジケーター（クリックで遷移可能なナビゲーション） */}
       <div className="flex items-center justify-center space-x-4">
         {[
-          { key: 'title', icon: Calendar, label: 'イベント名' },
           { key: 'dates', icon: Calendar, label: '日程選択' },
           { key: 'times', icon: Clock, label: '時間設定' },
-        ].map((step, index) => {
-          const isCurrent = currentStep === step.key;
-          const isCompleted = 
-            (step.key === 'title' && (currentStep === 'dates' || currentStep === 'times')) ||
-            (step.key === 'dates' && currentStep === 'times');
-
+        ].map((stepObj, index) => {
+          const isActive = step === stepObj.key;
+          const isClickable =
+            (stepObj.key === 'dates') ||
+            (stepObj.key === 'times' && canGoToTimes);
           return (
-            <div key={step.key} className="flex items-center">
-              <div
-                className={`flex items-center justify-center w-10 h-10 rounded-full border-2 transition-all ${
-                  isCurrent
-                    ? 'border-blue-600 bg-blue-600 text-white'
-                    : isCompleted
-                    ? 'border-green-600 bg-green-600 text-white'
-                    : 'border-gray-300 text-gray-400'
-                }`}
+            <div key={stepObj.key} className="flex items-center">
+              <Button
+                type="button"
+                variant={isActive ? 'default' : 'outline'}
+                className={`w-10 h-10 rounded-full flex items-center justify-center p-0 ${isActive ? 'bg-blue-600 text-white' : 'bg-white text-gray-400 border-gray-300'}`}
+                aria-current={isActive ? 'step' : undefined}
+                aria-label={stepObj.label}
+                onClick={() => isClickable && setStep(stepObj.key as 'dates' | 'times')}
+                disabled={!isClickable}
               >
-                <step.icon className="h-5 w-5" />
-              </div>
+                <stepObj.icon className="h-5 w-5" />
+              </Button>
               <span
-                className={`ml-2 text-sm font-medium ${
-                  isCurrent ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-400'
-                }`}
+                className={`ml-2 text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-400'}`}
               >
-                {step.label}
+                {stepObj.label}
               </span>
-              {index < 2 && (
+              {index < 1 && (
                 <div
-                  className={`w-8 h-0.5 mx-4 ${
-                    isCompleted ? 'bg-green-600' : 'bg-gray-300'
-                  }`}
+                  className={`w-8 h-0.5 mx-4 ${step === 'times' ? 'bg-blue-600' : 'bg-gray-300'}`}
                 />
               )}
             </div>
@@ -138,9 +169,10 @@ export const EventCreationWizard = memo(function EventCreationWizard({
         })}
       </div>
 
-      {/* ステップコンテンツ */}
-      {currentStep === 'title' && (
-        <div className="space-y-4">
+      {/* ステップごとのUI */}
+      {step === 'dates' && (
+        <div className="grid md:grid-cols-2 gap-8">
+          {/* イベント名入力 */}
           <Card className="border-0 shadow-sm">
             <CardHeader>
               <CardTitle className="text-center">イベント名を入力してください</CardTitle>
@@ -149,87 +181,123 @@ export const EventCreationWizard = memo(function EventCreationWizard({
               <PollTitle title={title} onTitleChange={onTitleChange} />
             </CardContent>
           </Card>
-        </div>
-      )}
 
-      {currentStep === 'dates' && (
-        <div className="space-y-4">
+          {/* 候補日＋時間帯選択 */}
           <Card className="border-0 shadow-sm">
             <CardHeader>
-              <CardTitle className="text-center">候補日を選択してください</CardTitle>
+              <CardTitle className="text-center">候補日と時間帯を選択してください</CardTitle>
               <p className="text-center text-sm text-gray-600">
-                カレンダーの日付をクリックして複数日を選択できます
+                カレンダーで日付を選択し、各日付の時間帯をボタンで追加できます
               </p>
             </CardHeader>
             <CardContent>
-              <CalendarPicker
-                selectedDates={selectedDates}
-                onDateToggle={handleDateToggle}
-                minDate={minDate}
-              />
+              <div className="space-y-4">
+                <CalendarPicker
+                  selectedDates={selectedDates}
+                  onDateToggle={handleDateToggle}
+                  minDate={minDate}
+                />
+                {/* 日付ごとの時間帯プリセットUI */}
+                {selectedDates.length > 0 && (
+                  <div className="space-y-3">
+                    {selectedDates.map(date => (
+                      <div key={date} className="flex flex-col md:flex-row md:items-center md:gap-4 border rounded p-3">
+                        <span className="font-medium text-sm w-28">
+                          {new Date(date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}
+                        </span>
+                        <div className="flex gap-2 flex-wrap">
+                          {PRESET_TIME_SLOTS.map(preset => {
+                            const isSelected = selectedDatesWithTimeSlots[date]?.some(
+                              slot => slot.startTime === preset.startTime && slot.endTime === preset.endTime
+                            );
+                            return (
+                              <Button
+                                key={preset.label}
+                                type="button"
+                                size="sm"
+                                variant={isSelected ? 'default' : 'outline'}
+                                className={isSelected ? 'bg-blue-600 text-white' : ''}
+                                onClick={() =>
+                                  isSelected
+                                    ? handleRemovePresetTimeSlot(date, preset)
+                                    : handleAddPresetTimeSlot(date, preset)
+                                }
+                              >
+                                {preset.label}（{preset.startTime}〜{preset.endTime}）
+                              </Button>
+                            );
+                          })}
+                        </div>
+                        {/* 選択済み時間帯バッジ */}
+                        <div className="flex gap-1 flex-wrap mt-2 md:mt-0">
+                          {selectedDatesWithTimeSlots[date]?.map(slot => (
+                            <span key={slot.id} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
+                              {slot.label} {slot.startTime}〜{slot.endTime}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
       )}
 
-      {currentStep === 'times' && (
-        <div className="space-y-4">
-          <Card className="border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-center">時間帯を設定してください</CardTitle>
-              <p className="text-center text-sm text-gray-600">
-                各日程の時間帯を個別に設定できます
-              </p>
-            </CardHeader>
-          </Card>
-
-          <div className="space-y-4">
-            {candidates.map(candidate => (
-              <TimeSlotEditor
-                key={candidate.date}
-                date={candidate.date}
-                timeSlots={candidate.timeSlots}
-                onTimeSlotsChange={handleTimeSlotsChange}
-                onRemoveDate={handleRemoveDate}
-              />
-            ))}
-          </div>
+      {step === 'dates' && (
+        <div className="flex justify-end pt-6 border-t border-gray-100">
+          <Button
+            onClick={handleNext}
+            disabled={Object.values(selectedDatesWithTimeSlots).every(slots => slots.length === 0)}
+            className="px-8 bg-blue-600 hover:bg-blue-700"
+            aria-disabled={Object.values(selectedDatesWithTimeSlots).every(slots => slots.length === 0)}
+          >
+            次へ
+          </Button>
         </div>
       )}
 
-      {/* ナビゲーションボタン */}
-      <div className="flex items-center justify-between pt-6 border-t border-gray-100">
-        <Button
-          variant="outline"
-          onClick={handleBack}
-          disabled={currentStep === 'title'}
-          className="px-6"
-        >
-          戻る
-        </Button>
+      {step === 'times' && (
+        <>
+          {/* 時間帯設定（候補日ごと） */}
+          <div className="space-y-4">
+            <Card className="border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-center">時間帯を設定してください</CardTitle>
+                <p className="text-center text-sm text-gray-600">
+                  各日程の時間帯を個別に設定できます（必要に応じて編集・追加も可能）
+                </p>
+              </CardHeader>
+            </Card>
+            <div className="space-y-4">
+              {candidates.map(candidate => (
+                <TimeSlotEditor
+                  key={candidate.date}
+                  date={candidate.date}
+                  timeSlots={candidate.timeSlots}
+                  onTimeSlotsChange={handleTimeSlotsChange}
+                  onRemoveDate={handleRemoveDate}
+                />
+              ))}
+            </div>
+          </div>
 
-        <div className="flex items-center gap-3">
-          {currentStep === 'times' && (
-            <span className="text-sm text-gray-600">
-              設定完了後、URLを共有できます
-            </span>
-          )}
-          <Button
-            onClick={handleNext}
-            disabled={!canProceed}
-            className="px-6 bg-blue-600 hover:bg-blue-700"
-          >
-            {currentStep === 'times' ? (
-              <>
-                <Share2 className="h-4 w-4 mr-2" />
-                作成完了
-              </>
-            ) : (
-              '次へ'
-            )}
-          </Button>
-        </div>
-      </div>
+          {/* 完了ボタン */}
+          <div className="flex justify-end pt-6 border-t border-gray-100">
+            <Button
+              onClick={onComplete}
+              disabled={!canComplete}
+              className="px-8 bg-blue-600 hover:bg-blue-700"
+              aria-disabled={!canComplete}
+            >
+              <Share2 className="h-4 w-4 mr-2" />
+              作成完了
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }); 

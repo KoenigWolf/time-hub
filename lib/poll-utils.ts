@@ -33,6 +33,7 @@ export function getBestDateTimes(pollData: PollData): BestDateTime[] {
   if (!pollData.users.length || !pollData.candidates.length) return [];
 
   const allCandidates: BestDateTime[] = [];
+  const totalUsers = pollData.users.length;
   
   pollData.candidates.forEach((candidate, candidateIndex) => {
     candidate.timeSlots.forEach((timeSlot, timeSlotIndex) => {
@@ -47,8 +48,8 @@ export function getBestDateTimes(pollData: PollData): BestDateTime[] {
     });
   });
 
-  const max = Math.max(...allCandidates.map(c => c.available));
-  return allCandidates.filter(c => c.available === max && max > 0);
+  // 全員○の候補日時のみ返す
+  return allCandidates.filter(c => c.available === totalUsers && totalUsers > 0);
 }
 
 /** 回答(○×)をトグル */
