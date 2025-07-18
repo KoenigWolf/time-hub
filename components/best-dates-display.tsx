@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, VFC } from 'react';
+import { memo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Trophy } from 'lucide-react';
@@ -19,7 +19,7 @@ export interface BestDatesDisplayProps {
 }
 
 // 最適な候補日バッジ（再利用性・テスト容易性向上）
-const BestDateBadge: VFC<{ date: string; available: number }> = ({ date, available }) => (
+const BestDateBadge = ({ date, available }: { date: string; available: number }) => (
   <Badge variant="outline" className="bg-white border-green-200 text-green-800">
     {formatDate(date)}（{available}名）
   </Badge>
