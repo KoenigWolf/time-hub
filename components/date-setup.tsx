@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, VFC } from 'react';
+import { memo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,14 +14,16 @@ export interface DateSetupProps {
   onRemoveDate: (index: number) => void;
 }
 
-// 候補日入力行（小コンポーネント化で可読性・複雑度低減・テストしやすく）
-const DateInputRow: VFC<{
+// DateInputRow用のprops型
+interface DateInputRowProps {
   date: string;
   index: number;
   onChange: (index: number, value: string) => void;
   onRemove: (index: number) => void;
   removable: boolean;
-}> = memo(function DateInputRow({ date, index, onChange, onRemove, removable }) {
+}
+// 日付入力行（小コンポーネント化で責務分離・テスト容易性向上）
+const DateInputRow = ({ date, index, onChange, onRemove, removable }: DateInputRowProps) => {
   return (
     <li className="flex items-center gap-3">
       <Input
@@ -46,7 +48,7 @@ const DateInputRow: VFC<{
       )}
     </li>
   );
-});
+};
 
 // 日程候補入力用メインコンポーネント
 export const DateSetup = memo(function DateSetup({
