@@ -1,15 +1,72 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { PollData, Answer, User, DateTimeCandidate } from '@/lib/types';
-import { encodePollToUrl, decodePollFromUrl, savePollLocal } from '@/lib/poll-storage';
-import { migrateDatesToCandidates, getTotalTimeSlots } from '@/lib/poll-utils';
+import type { PollData, Answer, User, DateTimeCandidate } from '@/lib/types';
+import {
+  encodePollToUrl,
+  decodePollFromUrl,
+  savePollLocal,
+} from '@/lib/poll-storage';
+import {
+  migrateDatesToCandidates,
+  getTotalTimeSlots,
+} from '@/lib/poll-utils';
 
-/**
- * 日程調整データの状態管理フック。
- * URL・ローカルストレージ同期・編集・回答・シェアまで一括管理。
- * 新形式（candidates）と旧形式（dates）の両方に対応。
- */
-export function usePollData() {
+// --- 副作用ハンドラの抽象化 ---
+// URL+Storage同期。責務を isolate し、他ロジックから独立可能に
+function syncPollDataToExternal(data: PollData, router: ReturnType<typeof useRouter>) {
+  savePollLocal(data);
+  const encoded = encodePollToUrl(data);
+  if (encoded) {
+    router.push(`/?poll=${encoded}`);
+  }
+}
+
+// デバウンス制御を一元管理（型安全）しつつ副作用を完全制御
+function useDebouncedCallback(cb: () => void, delay = 500) {
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const cancel = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const schedule = useCallback(() => {
+    cancel();
+    timer.current = setTimeout(cb, delay);
+  }, [cb, delay, cancel]);
+  useEffect(() => cancel, [cancel]);
+  return schedule;
+}
+
+// Pollデータ復元処理を抽出（テスト容易化・分岐一元化）
+function parsePollData(param: string | null): PollData | null {
+  if (!param) return null;
+  try {
+    const decoded = decodePollFromUrl(param);
+    if (!decoded) return null;
+    if (decoded.dates && !decoded.candidates?.length) {
+      return {
+        ...decoded,
+        candidates: migrateDatesToCandidates(decoded.dates),
+        dates: undefined,
+      };
+    }
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+// 型定義をexportして拡張・テストしやすく
+export interface UsePollData {
+  pollData: PollData;
+  mounted: boolean;
+  handleTitleChange: (title: string) => void;
+  handleCandidatesChange: (candidates: DateTimeCandidate[]) => void;
+  submitAnswer: (name: string, answers: Answer[]) => void;
+  toggleExistingAnswer: (userIdx: number, flatIdx: number) => void;
+  getShareUrl: () => string;
+}
+
+// --- 本体フック ---
+export function usePollData(): UsePollData {
   const [pollData, setPollData] = useState<PollData>({
     title: '',
     candidates: [],
@@ -18,200 +75,90 @@ export function usePollData() {
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  
-  // デバウンス用のref
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const pollDataRef = useRef(pollData);
-  
-  // pollDataRefを常に最新に保つ
-  useEffect(() => {
-    pollDataRef.current = pollData;
-  }, [pollData]);
 
-  // マウント検知
+  // 最新pollData参照用（副作用対応）
+  const pollRef = useRef(pollData);
+  pollRef.current = pollData;
+
+  // マウント判定（SSR対応・テスト用に分離）
   useEffect(() => { setMounted(true); }, []);
 
-  // URLからデータ復元（poll paramのみ責務集中）
+  // --- 初回ロード処理 ---
   useEffect(() => {
-    const pollParam = searchParams.get('poll');
-    if (pollParam) {
-      try {
-        const decoded = decodePollFromUrl(pollParam);
-        if (decoded) {
-          // 旧形式から新形式への移行
-          if (decoded.dates && !decoded.candidates?.length) {
-            const migratedCandidates = migrateDatesToCandidates(decoded.dates);
-            setPollData({
-              ...decoded,
-              candidates: migratedCandidates,
-              dates: undefined, // 旧形式を削除
-            });
-          } else {
-            setPollData(decoded);
-          }
-        } else {
-          // デコードに失敗した場合はURLパラメータをクリア
-          console.warn('Invalid poll URL parameter detected, clearing URL');
-          router.replace('/');
-        }
-      } catch (error) {
-        console.error('Error processing poll URL parameter:', error);
-        // エラーが発生した場合もURLをクリア
-        router.replace('/');
-      }
-    }
+    const next = parsePollData(searchParams.get('poll'));
+    if (next) setPollData(next);
+    else if (searchParams.get('poll')) router.replace('/');
     // eslint-disable-next-line
   }, [searchParams, router]);
 
-  // URL更新とローカルストレージ保存（デバウンス付き）
-  const updateUrlAndStorage = useCallback((data: PollData) => {
-    // 既存のタイマーをクリア
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    
-    // デバウンス（500ms）
-    timeoutRef.current = setTimeout(() => {
-      try {
-        savePollLocal(data);
-        const encoded = encodePollToUrl(data);
-        if (encoded) {
-          router.push(`/?poll=${encoded}`);
-        } else {
-          console.warn('Failed to encode poll data, staying on current page');
-        }
-      } catch (error) {
-        console.error('Error updating URL and storage:', error);
-      }
-    }, 500);
-  }, [router]);
+  // --- URL/Storage 同期 ---
+  const syncExternal = useCallback(
+    (data: PollData) => syncPollDataToExternal(data, router),
+    [router]
+  );
+  const debouncedSync = useDebouncedCallback(() => syncExternal(pollRef.current), 500);
 
-  // Pollデータ変更（即座にstateを更新、URLとストレージはデバウンス）
-  const updatePollData = useCallback((next: PollData) => {
+  // --- 状態変更ハンドラ群 ---
+  // 変更後すぐstate更新、その後同期処理
+  const updatePoll = useCallback((next: PollData) => {
     setPollData(next);
-    updateUrlAndStorage(next);
-  }, [updateUrlAndStorage]);
+    debouncedSync();
+  }, [debouncedSync]);
 
-  // タイトル変更（最適化版）
   const handleTitleChange = useCallback((title: string) => {
-    // stateを即座に更新
-    setPollData(prev => {
-      const next = { ...prev, title };
-      // URL更新はデバウンス
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      timeoutRef.current = setTimeout(() => {
-        try {
-          savePollLocal(next);
-          const encoded = encodePollToUrl(next);
-          if (encoded) {
-            router.push(`/?poll=${encoded}`);
-          } else {
-            console.warn('Failed to encode poll data during title change');
-          }
-        } catch (error) {
-          console.error('Error updating URL during title change:', error);
-        }
-      }, 500);
-      return next;
-    });
-  }, [router]);
+    updatePoll({ ...pollRef.current, title });
+  }, [updatePoll]);
 
-  // 候補日時変更
   const handleCandidatesChange = useCallback((candidates: DateTimeCandidate[]) => {
-    setPollData(prev => {
-      // 既存ユーザーの回答数を新しい候補日時数に合わせる
-      const totalSlots = getTotalTimeSlots(candidates);
-      const updatedUsers = prev.users.map(user => ({
-        ...user,
-        answers: user.answers.slice(0, totalSlots).concat(
-          Array(Math.max(0, totalSlots - user.answers.length)).fill('×')
+    const total = getTotalTimeSlots(candidates);
+    const users = pollRef.current.users.map(u => ({
+      ...u,
+      answers: u.answers.slice(0, total).concat(
+        Array(Math.max(0, total - u.answers.length)).fill('×')
+      )
+    }));
+    updatePoll({ ...pollRef.current, candidates, users });
+  }, [updatePoll]);
+
+  const submitAnswer = useCallback((name: string, answers: Answer[]) => {
+    const userName = name.trim();
+    if (!userName) return;
+    const users = [...pollRef.current.users];
+    const idx = users.findIndex(u => u.name === userName);
+    const user: User = { name: userName, answers: [...answers] };
+    if (idx >= 0) users[idx] = user;
+    else users.push(user);
+    updatePoll({ ...pollRef.current, users });
+  }, [updatePoll]);
+
+  const toggleExistingAnswer = useCallback((userIdx: number, flatIdx: number) => {
+    const users = pollRef.current.users.map((u, i) =>
+      i !== userIdx ? u : {
+        ...u,
+        answers: u.answers.map((a, j) =>
+          j === flatIdx ? (a === '○' ? '×' : '○') : a
         )
-      }));
-
-      const newData = {
-        ...prev,
-        candidates,
-        users: updatedUsers,
-      };
-      
-      updateUrlAndStorage(newData);
-      return newData;
-    });
-  }, [updateUrlAndStorage]);
-
-  // 回答追加/更新
-  const submitAnswer = useCallback((userName: string, answers: Answer[]) => {
-    const name = userName.trim();
-    if (!name) return;
-    
-    setPollData(prev => {
-      const idx = prev.users.findIndex(u => u.name === name);
-      const newUser: User = { name, answers: [...answers] };
-      let users;
-      if (idx >= 0) {
-        users = prev.users.slice();
-        users[idx] = newUser;
-      } else {
-        users = [...prev.users, newUser];
       }
-      
-      const newData = { ...prev, users };
-      updateUrlAndStorage(newData);
-      return newData;
-    });
-  }, [updateUrlAndStorage]);
+    );
+    updatePoll({ ...pollRef.current, users });
+  }, [updatePoll]);
 
-  // 回答トグル（フラット配列のインデックスベース）
-  const toggleExistingAnswer = useCallback((userIdx: number, flatIndex: number) => {
-    setPollData(prev => {
-      const users = prev.users.map((u, i) =>
-        i === userIdx
-          ? { 
-              ...u, 
-              answers: u.answers.map((a, j) => 
-                j === flatIndex ? (a === '○' ? '×' : '○') : a
-              ) 
-            }
-          : u
-      );
-      
-      const newData = { ...prev, users };
-      updateUrlAndStorage(newData);
-      return newData;
-    });
-  }, [updateUrlAndStorage]);
-
-  // シェアURL生成
-  const getShareUrl = useCallback(() => {
+  const getShareUrl = useCallback((): string => {
     if (!mounted) return '';
     try {
-      const encoded = encodePollToUrl(pollData);
-      if (!encoded) {
-        console.warn('Failed to encode poll data for sharing');
-        return '';
-      }
-      return `${typeof window !== 'undefined' ? window.location.origin : ''}/?poll=${encoded}`;
-    } catch (error) {
-      console.error('Error generating share URL:', error);
+      const encoded = encodePollToUrl(pollRef.current);
+      if (!encoded) return '';
+      return typeof window !== 'undefined'
+        ? `${window.location.origin}/?poll=${encoded}`
+        : `/?poll=${encoded}`;
+    } catch {
       return '';
     }
-  }, [mounted, pollData]);
-
-  // クリーンアップ
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-  }, []);
+  }, [mounted]);
 
   return {
     pollData,
     mounted,
-    // 新形式
     handleTitleChange,
     handleCandidatesChange,
     submitAnswer,

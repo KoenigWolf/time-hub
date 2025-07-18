@@ -7,47 +7,55 @@ import { Users, Share2 } from 'lucide-react';
 import { PollData } from '@/lib/types';
 import { formatDate } from '@/lib/date-utils';
 
-interface BestDate {
+// 最適日データ型
+export interface BestDate {
   index: number;
   available: number;
 }
 
-interface ResultsTableProps {
+// 回答テーブルprops型
+export interface ResultsTableProps {
   pollData: PollData;
   bestDates: BestDate[];
   onToggleAnswer: (userIndex: number, dateIndex: number) => void;
   onShare: () => void;
 }
 
-// 後方互換性のためのヘルパー関数
+// dates配列から有効日付のみ抽出
 const getValidDates = (dates: string[]): string[] =>
   dates.filter(d => !!d.trim());
 
-const getDateSummary = (pollData: PollData, dateIdx: number) => {
-  const available = pollData.users.reduce(
+// 各日付の出席可能人数集計
+const getDateSummary = (pollData: PollData, dateIdx: number) => ({
+  available: pollData.users.reduce(
     (sum, user) => sum + (user.answers[dateIdx] === '○' ? 1 : 0),
     0
-  );
-  return { available };
-};
+  ),
+});
 
-/** 回答行: 各ユーザーごとの一行 */
+// 回答行コンポーネント（ユーザー単位で責務分離）
+interface ResultsTableRowProps {
+  user: PollData['users'][number];
+  userIndex: number;
+  dateCount: number;
+  onToggleAnswer: (userIndex: number, dateIndex: number) => void;
+  allOkColumns: boolean[];
+}
 const ResultsTableRow = memo(function ResultsTableRow({
   user,
   userIndex,
   dateCount,
   onToggleAnswer,
-}: {
-  user: PollData['users'][number];
-  userIndex: number;
-  dateCount: number;
-  onToggleAnswer: (userIndex: number, dateIndex: number) => void;
-}) {
+  allOkColumns,
+}: ResultsTableRowProps) {
   return (
     <tr className="border-b border-gray-50 hover:bg-gray-25">
       <td className="py-3 px-2 font-medium text-gray-900">{user.name}</td>
-      {user.answers.slice(0, dateCount).map((answer, dateIndex) => (
-        <td key={dateIndex} className="py-3 px-2 text-center">
+      {user.answers.slice(0, dateCount).map((answer: string, dateIndex: number) => (
+        <td
+          key={dateIndex}
+          className={`py-3 px-2 text-center ${allOkColumns[dateIndex] ? 'bg-yellow-100' : ''}`}
+        >
           <Button
             variant="ghost"
             size="sm"
@@ -68,24 +76,25 @@ const ResultsTableRow = memo(function ResultsTableRow({
   );
 });
 
-/** テーブルヘッダー: 日付カラム */
+// ヘッダーコンポーネント（日付・人数・最適日ラベル責務分離）
+interface ResultsTableHeaderProps {
+  validDates: string[];
+  pollData: PollData;
+  bestDates: BestDate[];
+}
 const ResultsTableHeader = memo(function ResultsTableHeader({
   validDates,
   pollData,
   bestDates,
-}: {
-  validDates: string[];
-  pollData: PollData;
-  bestDates: BestDate[];
-}) {
+}: ResultsTableHeaderProps) {
   return (
     <tr className="border-b border-gray-100">
       <th className="text-left py-3 px-2 font-medium text-gray-700 min-w-[100px]">
         名前
       </th>
-      {validDates.map((date, idx) => {
-        const summary = getDateSummary(pollData, idx);
-        const isBest = bestDates.some(best => best.index === idx);
+      {validDates.map((date: string, idx: number) => {
+        const { available } = getDateSummary(pollData, idx);
+        const isBest = bestDates.some((best: BestDate) => best.index === idx);
         return (
           <th
             key={date}
@@ -96,7 +105,7 @@ const ResultsTableHeader = memo(function ResultsTableHeader({
           >
             <div className="space-y-1">
               <div className="text-xs">{formatDate(date)}</div>
-              <div className="text-xs text-gray-500">{summary.available}名</div>
+              <div className="text-xs text-gray-500">{available}名</div>
             </div>
           </th>
         );
@@ -105,16 +114,21 @@ const ResultsTableHeader = memo(function ResultsTableHeader({
   );
 });
 
-/** 回答テーブル全体 */
+// 回答テーブル本体
 export const ResultsTable = memo(function ResultsTable({
   pollData,
   bestDates,
   onToggleAnswer,
   onShare,
 }: ResultsTableProps) {
+  // 有効日付抽出
   const validDates = getValidDates(pollData.dates || []);
-
   if (!pollData.users.length || !validDates.length) return null;
+
+  // 全員○の列を判定
+  const allOkColumns = validDates.map((_, dateIdx) =>
+    pollData.users.every(user => user.answers[dateIdx] === '○')
+  );
 
   return (
     <Card className="border-0 shadow-sm">
@@ -138,7 +152,6 @@ export const ResultsTable = memo(function ResultsTable({
             共有
           </Button>
         </div>
-
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -156,6 +169,7 @@ export const ResultsTable = memo(function ResultsTable({
                   userIndex={userIndex}
                   dateCount={validDates.length}
                   onToggleAnswer={onToggleAnswer}
+                  allOkColumns={allOkColumns}
                 />
               ))}
             </tbody>

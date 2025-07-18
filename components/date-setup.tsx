@@ -1,25 +1,54 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, VFC } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Plus, Trash2 } from 'lucide-react';
 
-interface DateSetupProps {
+// props型をexportして型・テスト容易性・再利用性UP
+export interface DateSetupProps {
   dates: string[];
   onDateChange: (index: number, date: string) => void;
   onAddDate: () => void;
   onRemoveDate: (index: number) => void;
 }
 
-/**
- * 日程候補入力用コンポーネント。
- * - dates: 候補日文字列配列
- * - onDateChange: 候補日更新コールバック
- * - onAddDate: 候補日追加コールバック
- * - onRemoveDate: 候補日削除コールバック
- */
+// 候補日入力行（小コンポーネント化で可読性・複雑度低減・テストしやすく）
+const DateInputRow: VFC<{
+  date: string;
+  index: number;
+  onChange: (index: number, value: string) => void;
+  onRemove: (index: number) => void;
+  removable: boolean;
+}> = memo(function DateInputRow({ date, index, onChange, onRemove, removable }) {
+  return (
+    <li className="flex items-center gap-3">
+      <Input
+        type="date"
+        value={date}
+        onChange={e => onChange(index, e.target.value)}
+        className="border-0 border-b border-gray-200 rounded-none px-0 focus-visible:ring-0 focus-visible:border-gray-400"
+        aria-label={`候補日${index + 1}`}
+        max="2100-01-01"
+      />
+      {removable && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onRemove(index)}
+          aria-label={`候補日${index + 1}を削除`}
+          className="text-gray-400 hover:text-red-500 p-1"
+          type="button"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      )}
+    </li>
+  );
+});
+
+// 日程候補入力用メインコンポーネント
 export const DateSetup = memo(function DateSetup({
   dates,
   onDateChange,
@@ -47,28 +76,14 @@ export const DateSetup = memo(function DateSetup({
         </div>
         <ul className="grid gap-3">
           {dates.map((date, idx) => (
-            <li key={idx} className="flex items-center gap-3">
-              <Input
-                type="date"
-                value={date}
-                onChange={e => onDateChange(idx, e.target.value)}
-                className="border-0 border-b border-gray-200 rounded-none px-0 focus-visible:ring-0 focus-visible:border-gray-400"
-                aria-label={`候補日${idx + 1}`}
-                max={new Date(2100, 0, 1).toISOString().slice(0, 10)}
-              />
-              {dates.length > 1 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onRemoveDate(idx)}
-                  aria-label={`候補日${idx + 1}を削除`}
-                  className="text-gray-400 hover:text-red-500 p-1"
-                  type="button"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
-            </li>
+            <DateInputRow
+              key={idx}
+              date={date}
+              index={idx}
+              onChange={onDateChange}
+              onRemove={onRemoveDate}
+              removable={dates.length > 1}
+            />
           ))}
         </ul>
       </CardContent>
