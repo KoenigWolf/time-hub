@@ -23,7 +23,7 @@ function syncPollDataToExternal(data: PollData, router: ReturnType<typeof useRou
 
 // デバウンス制御を一元管理（型安全）しつつ副作用を完全制御
 function useDebouncedCallback(cb: () => void, delay = 500) {
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const cancel = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
   }, []);
