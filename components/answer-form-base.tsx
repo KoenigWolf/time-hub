@@ -1,54 +1,110 @@
 'use client';
 
-import { useState, useMemo, useCallback, ReactNode } from 'react';
+/**
+ * AnswerFormBase（全観点最適化・国際化対応・エラー解消版）
+ * - 日付単位 or 日付＋時間帯単位の出欠回答フォーム
+ * - 型安全/国際化/再利用/アクセシビリティ/パフォーマンス/拡張性/冗長性削減を徹底
+ */
+
+import { useState, useMemo, useCallback, ReactNode, memo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Answer, DateTimeCandidate, TimeSlot } from '@/lib/types';
 import { toggleAnswer, getTotalTimeSlots } from '@/lib/poll-utils';
-import { formatDate } from '@/lib/date-utils';
-import { formatTimeSlot } from '@/lib/calendar-utils';
 
-// 共通回答フォームのprops型
+// ---- 国際化定義 ----
+
+type Lang = 'ja' | 'en';
+
+const I18N = {
+  ja: {
+    yourAnswer: 'あなたの回答',
+    namePlaceholder: 'お名前',
+    send: '回答を送信',
+    label: 'ラベル',
+    requiredName: 'お名前を入力してください',
+    switch: (label: string) => `回答を切り替え: ${label}`,
+    shortWeekday: (date: string) =>
+      new Date(date).toLocaleDateString('ja-JP', { weekday: 'short' }),
+    formatDate: (date: string) =>
+      new Date(date).toLocaleDateString('ja-JP', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      }),
+    formatTimeSlot: (slot: TimeSlot) =>
+      `${slot.label ? slot.label + ' ' : ''}${slot.startTime}〜${slot.endTime}`,
+  },
+  en: {
+    yourAnswer: 'Your Answer',
+    namePlaceholder: 'Name',
+    send: 'Submit',
+    label: 'Label',
+    requiredName: 'Please enter your name',
+    switch: (label: string) => `Toggle answer: ${label}`,
+    shortWeekday: (date: string) =>
+      new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
+    formatDate: (date: string) =>
+      new Date(date).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      }),
+    formatTimeSlot: (slot: TimeSlot) =>
+      `${slot.label ? slot.label + ' ' : ''}${slot.startTime}~${slot.endTime}`,
+  },
+} as const;
+
+// ---- props型定義 ----
+
 export type AnswerFormBaseProps =
   | {
       dates: string[];
       candidates?: undefined;
       onSubmit: (userName: string, answers: Answer[]) => void;
-      renderDateLabel?: (date: string) => ReactNode;
+      renderDateLabel?: (date: string, language?: Lang) => ReactNode;
+      language?: Lang;
     }
   | {
       dates?: undefined;
       candidates: DateTimeCandidate[];
       onSubmit: (userName: string, answers: Answer[]) => void;
-      renderDateLabel?: (date: string) => ReactNode;
+      renderDateLabel?: (date: string, language?: Lang) => ReactNode;
+      language?: Lang;
     };
 
-// 日付＋時間帯回答行（小コンポーネント化で複雑度・可読性改善）
-function DateTimeRow({
+// ---- 小コンポーネント ----
+
+const DateTimeRow = memo(function DateTimeRow({
   candidate,
   candidateIndex,
   flatIndexBase,
   answers,
   onToggle,
   renderDateLabel,
+  language,
 }: {
   candidate: DateTimeCandidate;
   candidateIndex: number;
   flatIndexBase: number;
   answers: Answer[];
   onToggle: (flatIndex: number) => void;
-  renderDateLabel?: (date: string) => ReactNode;
+  renderDateLabel?: (date: string, language?: Lang) => ReactNode;
+  language: Lang;
 }) {
+  const t = I18N[language];
   return (
-    <div className="border rounded-lg p-4 space-y-3">
+    <div className="border rounded-lg p-4 space-y-3" data-testid="datetime-row">
       <div className="flex items-center gap-2">
         <h4 className="font-medium text-gray-900">
-          {renderDateLabel ? renderDateLabel(candidate.date) : formatDate(candidate.date)}
+          {renderDateLabel
+            ? renderDateLabel(candidate.date, language)
+            : t.formatDate(candidate.date)}
         </h4>
         <Badge variant="outline" className="text-xs">
-          {new Date(candidate.date).toLocaleDateString('ja-JP', { weekday: 'short' })}
+          {t.shortWeekday(candidate.date)}
         </Badge>
       </div>
       <div className="grid gap-2">
@@ -56,14 +112,18 @@ function DateTimeRow({
           const flatIndex = flatIndexBase + timeSlotIndex;
           const answer = answers[flatIndex] || '×';
           return (
-            <div key={timeSlot.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded">
-              <span className="text-sm font-medium">{formatTimeSlot(timeSlot)}</span>
+            <div
+              key={timeSlot.id}
+              className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded"
+              data-testid="timeslot-row"
+            >
+              <span className="text-sm font-medium">{t.formatTimeSlot(timeSlot)}</span>
               <Button
                 type="button"
                 variant={answer === '○' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => onToggle(flatIndex)}
-                aria-label={`回答を切り替え: ${formatTimeSlot(timeSlot)}`}
+                aria-label={t.switch(t.formatTimeSlot(timeSlot))}
                 className={
                   answer === '○'
                     ? 'w-12 h-8 bg-green-600 hover:bg-green-700 text-white border-green-600'
@@ -78,33 +138,37 @@ function DateTimeRow({
       </div>
     </div>
   );
-}
+});
 
-// 日付のみ回答行
-function DateRow({
+const DateRow = memo(function DateRow({
   date,
   index,
   answer,
   onToggle,
   renderDateLabel,
+  language,
 }: {
   date: string;
   index: number;
   answer: Answer;
   onToggle: (index: number) => void;
-  renderDateLabel?: (date: string) => ReactNode;
+  renderDateLabel?: (date: string, language?: Lang) => ReactNode;
+  language: Lang;
 }) {
+  const t = I18N[language];
   return (
-    <div key={date} className="flex items-center justify-between py-2">
+    <div key={date} className="flex items-center justify-between py-2" data-testid="date-row">
       <span className="text-sm">
-        {renderDateLabel ? renderDateLabel(date) : formatDate(date)}
+        {renderDateLabel
+          ? renderDateLabel(date, language)
+          : t.formatDate(date)}
       </span>
       <Button
         type="button"
         variant={answer === '○' ? 'default' : 'outline'}
         size="sm"
         onClick={() => onToggle(index)}
-        aria-label={`回答を切り替え: ${formatDate(date)}`}
+        aria-label={t.switch(t.formatDate(date))}
         className={
           answer === '○'
             ? 'w-12 h-8 bg-green-600 hover:bg-green-700 text-white border-green-600'
@@ -115,11 +179,15 @@ function DateRow({
       </Button>
     </div>
   );
-}
+});
 
-// 回答フォーム本体
+// ---- 本体 ----
+
 export function AnswerFormBase(props: AnswerFormBaseProps) {
-  // 日付＋時間帯パターンかどうか
+  const language: Lang = props.language ?? 'ja';
+  const t = I18N[language];
+
+  // 回答パターン分岐
   const isDateTime = !!props.candidates;
 
   // 回答対象数
@@ -156,22 +224,25 @@ export function AnswerFormBase(props: AnswerFormBaseProps) {
     setAnswers(Array(totalCount).fill('×'));
   }, [props, userName, answers, totalCount, canSubmit]);
 
-  // 回答がなければ何も表示しない
   if (totalCount === 0) return null;
 
   return (
-    <Card className="border-0 shadow-sm">
+    <Card className="border-0 shadow-sm" aria-label="answer-form">
       <CardContent className="p-6 space-y-4">
-        <label className="text-sm font-medium">あなたの回答</label>
+        <label className="text-sm font-medium" htmlFor="user-name">
+          {t.yourAnswer}
+        </label>
         <div className="space-y-4">
           <Input
-            placeholder="お名前"
+            id="user-name"
+            placeholder={t.namePlaceholder}
             value={userName}
             onChange={e => setUserName(e.target.value)}
             className="border-0 border-b border-gray-200 rounded-none px-0 focus-visible:ring-0 focus-visible:border-gray-400"
             maxLength={24}
             autoComplete="off"
-            aria-label="お名前を入力"
+            aria-label={t.namePlaceholder}
+            required
           />
           {/* 回答リスト */}
           {isDateTime && props.candidates ? (
@@ -189,6 +260,7 @@ export function AnswerFormBase(props: AnswerFormBaseProps) {
                     answers={answers}
                     onToggle={handleToggle}
                     renderDateLabel={props.renderDateLabel}
+                    language={language}
                   />
                 );
                 return acc;
@@ -204,6 +276,7 @@ export function AnswerFormBase(props: AnswerFormBaseProps) {
                   answer={answers[i]}
                   onToggle={handleToggle}
                   renderDateLabel={props.renderDateLabel}
+                  language={language}
                 />
               ))}
             </div>
@@ -215,7 +288,7 @@ export function AnswerFormBase(props: AnswerFormBaseProps) {
             className="w-full bg-gray-900 hover:bg-gray-800 text-white"
             aria-disabled={!canSubmit}
           >
-            回答を送信
+            {t.send}
           </Button>
         </div>
       </CardContent>
