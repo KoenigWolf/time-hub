@@ -15,11 +15,6 @@ const geistMono = Geist_Mono({
   display: "swap",
 });
 
-export const FONT_VARS = {
-  SANS: geist.variable,
-  MONO: geistMono.variable,
-} as const;
-
 // ---- メタデータ定義 ----
 export const metadata: Metadata = {
   title: "time-hub - 高速シンプルな日程調整アプリ",
@@ -85,7 +80,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="ja" suppressHydrationWarning>
       <head />
-      <body className={`${FONT_VARS.SANS} ${FONT_VARS.MONO} antialiased min-h-screen`}>
+      <body className={`${geist.variable} ${geistMono.variable} antialiased min-h-screen`}>
         {children}
       </body>
     </html>
