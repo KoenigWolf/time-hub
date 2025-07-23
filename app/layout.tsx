@@ -1,17 +1,26 @@
+// app/layout.tsx
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-// フォント変数定義（再利用・可読性向上）
-const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+// ---- フォント設定 ----
+const geist = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+  display: "swap", // パフォーマンス最適化
+});
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+  display: "swap",
+});
 
-const FONT_VARS = {
+export const FONT_VARS = {
   SANS: geist.variable,
   MONO: geistMono.variable,
-};
+} as const;
 
-// サイト全体メタデータ
+// ---- メタデータ定義 ----
 export const metadata: Metadata = {
   title: "time-hub - 高速シンプルな日程調整アプリ",
   description: "URLを送るだけで瞬時に最適な日程が見つかる、高速でシンプルな日程調整アプリ。アカウント登録不要、スマートフォン対応。",
@@ -23,6 +32,8 @@ export const metadata: Metadata = {
     "時間",
     "調整",
     "無料",
+    "スケジューラー",
+    "カレンダー"
   ],
   authors: [{ name: "time-hub" }],
   creator: "time-hub",
@@ -33,28 +44,47 @@ export const metadata: Metadata = {
     description: "URLを送るだけで瞬時に最適な日程が見つかる、高速でシンプルな日程調整アプリ。",
     type: "website",
     locale: "ja_JP",
+    url: "https://time-hub.jp/",
+    siteName: "time-hub",
+    images: [
+      {
+        url: "https://time-hub.jp/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "time-hub オープングラフ画像"
+      }
+    ]
   },
   twitter: {
     card: "summary_large_image",
     title: "time-hub - 高速シンプルな日程調整アプリ",
     description: "URLを送るだけで瞬時に最適な日程が見つかる、高速でシンプルな日程調整アプリ。",
+    images: ["https://time-hub.jp/og-image.png"]
   },
   viewport: {
     width: "device-width",
     initialScale: 1,
     maximumScale: 1,
+    userScalable: false,
   },
 };
 
-// ルートレイアウト用 Props 型定義
+// ---- Props 型定義 ----
 type RootLayoutProps = {
   children: React.ReactNode;
 };
 
-// アプリ全体のレイアウト
+/**
+ * アプリ全体のレイアウトコンポーネント
+ * - フォント変数で全体に一貫したスタイル
+ * - 子要素でページ・UIを切り替え
+ * - セキュリティ: lang属性・メタデータを正しく設定
+ * - 拡張性: レイアウトへのchildren追加で容易に拡張可能
+ */
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="ja">
+    <html lang="ja" suppressHydrationWarning>
+      <head />
       <body className={`${FONT_VARS.SANS} ${FONT_VARS.MONO} antialiased min-h-screen`}>
         {children}
       </body>
