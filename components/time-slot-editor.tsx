@@ -1,5 +1,11 @@
 'use client';
 
+/**
+ * TimeSlotEditor
+ * - 日付単位で時間帯（TimeSlot）の編集・追加・削除を提供
+ * - 国際化・アクセシビリティ・拡張性・型安全・再利用性・パフォーマンス・UI/UX全観点対応
+ */
+
 import { useState, memo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,7 +15,51 @@ import { Plus, Trash2, Clock } from 'lucide-react';
 import { TimeSlot } from '@/lib/types';
 import { createDefaultTimeSlots, formatTimeSlot } from '@/lib/calendar-utils';
 
-// UUID生成（最新のEdge/Node/Chrome環境はcrypto.randomUUIDでOK、後方互換も考慮）
+// ---------- 国際化テキストと型 -----------
+
+type Lang = 'ja' | 'en';
+
+const I18N = {
+  ja: {
+    collapse: '折りたたむ',
+    expand: '詳細設定',
+    done: '完了',
+    setTime: '時間設定',
+    reset: '初期設定に戻す',
+    add: '追加',
+    labelPlaceholder: 'ラベル',
+    timeSetting: '時間帯設定',
+    removeDate: 'この日を削除',
+    removeSlot: '時間帯を削除',
+    help: '各時間帯にラベルを付けることで、参加者にとって分かりやすくなります。',
+  },
+  en: {
+    collapse: 'Collapse',
+    expand: 'Advanced',
+    done: 'Done',
+    setTime: 'Set Time',
+    reset: 'Reset Defaults',
+    add: 'Add',
+    labelPlaceholder: 'Label',
+    timeSetting: 'Time Slot Setting',
+    removeDate: 'Remove this day',
+    removeSlot: 'Remove time slot',
+    help: 'Adding labels makes it easier for participants to understand.',
+  },
+} as const;
+
+// ---------- props型（拡張性・再利用性） -----------
+
+export interface TimeSlotEditorProps {
+  date: string;
+  timeSlots: TimeSlot[];
+  onTimeSlotsChange: (date: string, timeSlots: TimeSlot[]) => void;
+  onRemoveDate: (date: string) => void;
+  language?: Lang;
+}
+
+// ---------- UUIDユーティリティ（型安全・安全性） -----------
+
 const generateId = (): string =>
   typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
@@ -19,26 +69,23 @@ const generateId = (): string =>
         return v.toString(16);
       });
 
-// props型exportで型安全・再利用性向上
-export interface TimeSlotEditorProps {
-  date: string;
-  timeSlots: TimeSlot[];
-  onTimeSlotsChange: (date: string, timeSlots: TimeSlot[]) => void;
-  onRemoveDate: (date: string) => void;
+// ---------- 単一時間帯編集行（小コンポーネント化） -----------
+
+interface TimeSlotRowProps {
+  timeSlot: TimeSlot;
+  onChange: (updated: TimeSlot) => void;
+  onRemove: () => void;
+  canRemove: boolean;
+  language: Lang;
 }
 
-// 単一時間帯編集行を小コンポーネント化
 const TimeSlotRow = memo(function TimeSlotRow({
   timeSlot,
   onChange,
   onRemove,
   canRemove,
-}: {
-  timeSlot: TimeSlot;
-  onChange: (updated: TimeSlot) => void;
-  onRemove: () => void;
-  canRemove: boolean;
-}) {
+  language,
+}: TimeSlotRowProps) {
   // 入力変化ハンドラ
   const handleInput = useCallback(
     (field: keyof TimeSlot, value: string) => {
@@ -50,17 +97,19 @@ const TimeSlotRow = memo(function TimeSlotRow({
   return (
     <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
       <Input
-        placeholder="ラベル"
+        placeholder={I18N[language].labelPlaceholder}
         value={timeSlot.label || ''}
         onChange={e => handleInput('label', e.target.value)}
         className="w-20 text-sm"
         maxLength={10}
+        aria-label={I18N[language].labelPlaceholder}
       />
       <Input
         type="time"
         value={timeSlot.startTime}
         onChange={e => handleInput('startTime', e.target.value)}
         className="w-24 text-sm"
+        aria-label="start time"
       />
       <span className="text-gray-400">〜</span>
       <Input
@@ -68,6 +117,7 @@ const TimeSlotRow = memo(function TimeSlotRow({
         value={timeSlot.endTime}
         onChange={e => handleInput('endTime', e.target.value)}
         className="w-24 text-sm"
+        aria-label="end time"
       />
       {canRemove && (
         <Button
@@ -75,7 +125,7 @@ const TimeSlotRow = memo(function TimeSlotRow({
           size="sm"
           onClick={onRemove}
           className="text-gray-400 hover:text-red-500 p-1"
-          aria-label="時間帯を削除"
+          aria-label={I18N[language].removeSlot}
           type="button"
         >
           <Trash2 className="h-4 w-4" />
@@ -85,17 +135,19 @@ const TimeSlotRow = memo(function TimeSlotRow({
   );
 });
 
-// 時間帯エディター本体
+// ---------- 本体コンポーネント -----------
+
 export const TimeSlotEditor = memo(function TimeSlotEditor({
   date,
   timeSlots,
   onTimeSlotsChange,
   onRemoveDate,
+  language = 'ja',
 }: TimeSlotEditorProps) {
-  // 詳細設定の開閉状態
   const [isExpanded, setIsExpanded] = useState(false);
+  const t = I18N[language];
 
-  // 各時間帯更新
+  // 時間帯更新
   const handleUpdate = useCallback(
     (idx: number, updated: TimeSlot) => {
       const slots = [...timeSlots];
@@ -132,12 +184,11 @@ export const TimeSlotEditor = memo(function TimeSlotEditor({
     onTimeSlotsChange(date, createDefaultTimeSlots());
   }, [date, onTimeSlotsChange]);
 
-  // 日付表示
-  const formattedDate = new Date(date).toLocaleDateString('ja-JP', {
-    month: 'short',
-    day: 'numeric',
-    weekday: 'short',
-  });
+  // 日付表示（国際化）
+  const formattedDate = new Date(date).toLocaleDateString(
+    language === 'en' ? 'en-US' : 'ja-JP',
+    { month: 'short', day: 'numeric', weekday: 'short' }
+  );
 
   return (
     <Card className="border-l-4 border-l-blue-500">
@@ -162,18 +213,18 @@ export const TimeSlotEditor = memo(function TimeSlotEditor({
               variant="ghost"
               size="sm"
               onClick={() => setIsExpanded(v => !v)}
-              aria-label={isExpanded ? '折りたたむ' : '詳細設定'}
+              aria-label={isExpanded ? t.collapse : t.expand}
               type="button"
             >
               <Clock className="h-4 w-4 mr-1" />
-              {isExpanded ? '完了' : '時間設定'}
+              {isExpanded ? t.done : t.setTime}
             </Button>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => onRemoveDate(date)}
               className="text-gray-400 hover:text-red-500"
-              aria-label="この日を削除"
+              aria-label={t.removeDate}
               type="button"
             >
               <Trash2 className="h-4 w-4" />
@@ -185,7 +236,7 @@ export const TimeSlotEditor = memo(function TimeSlotEditor({
       {isExpanded && (
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-medium text-gray-700">時間帯設定</h4>
+            <h4 className="text-sm font-medium text-gray-700">{t.timeSetting}</h4>
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -194,7 +245,7 @@ export const TimeSlotEditor = memo(function TimeSlotEditor({
                 className="text-xs"
                 type="button"
               >
-                初期設定に戻す
+                {t.reset}
               </Button>
               <Button
                 variant="outline"
@@ -204,7 +255,7 @@ export const TimeSlotEditor = memo(function TimeSlotEditor({
                 type="button"
               >
                 <Plus className="h-3 w-3 mr-1" />
-                追加
+                {t.add}
               </Button>
             </div>
           </div>
@@ -217,12 +268,13 @@ export const TimeSlotEditor = memo(function TimeSlotEditor({
                 onChange={updated => handleUpdate(i, updated)}
                 onRemove={() => handleRemove(i)}
                 canRemove={timeSlots.length > 1}
+                language={language}
               />
             ))}
           </div>
 
           <p className="text-xs text-gray-500 mt-2">
-            各時間帯にラベルを付けることで、参加者にとって分かりやすくなります。
+            {t.help}
           </p>
         </CardContent>
       )}
