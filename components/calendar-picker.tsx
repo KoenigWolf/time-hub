@@ -10,7 +10,7 @@ import { useState, memo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { generateCalendarDates, getMonthName, getDayNames } from '@/lib/calendar-utils';
+import { generateCalendarDates } from '@/lib/calendar-utils';
 import { CalendarDate } from '@/lib/types';
 
 // --- 国際化定義 ---

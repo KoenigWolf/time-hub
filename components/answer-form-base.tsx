@@ -79,7 +79,6 @@ export type AnswerFormBaseProps =
 
 const DateTimeRow = memo(function DateTimeRow({
   candidate,
-  candidateIndex,
   flatIndexBase,
   answers,
   onToggle,
@@ -87,7 +86,6 @@ const DateTimeRow = memo(function DateTimeRow({
   language,
 }: {
   candidate: DateTimeCandidate;
-  candidateIndex: number;
   flatIndexBase: number;
   answers: Answer[];
   onToggle: (flatIndex: number) => void;
@@ -255,7 +253,6 @@ export function AnswerFormBase(props: AnswerFormBaseProps) {
                   <DateTimeRow
                     key={candidate.date}
                     candidate={candidate}
-                    candidateIndex={candidateIndex}
                     flatIndexBase={flatIndexBase}
                     answers={answers}
                     onToggle={handleToggle}

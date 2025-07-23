@@ -11,32 +11,49 @@ import {
   getTotalTimeSlots,
 } from '@/lib/poll-utils';
 
-// --- 副作用ハンドラの抽象化 ---
-// URL+Storage同期。責務を isolate し、他ロジックから独立可能に
-function syncPollDataToExternal(data: PollData, router: ReturnType<typeof useRouter>) {
-  savePollLocal(data);
-  const encoded = encodePollToUrl(data);
-  if (encoded) {
-    router.push(`/?poll=${encoded}`);
+/**
+ * Safely sync poll data to URL and LocalStorage.
+ * Extensible: allow sanitization, custom url param, or analytics hooks.
+ */
+function syncPollDataToExternal(data: PollData, router: ReturnType<typeof useRouter>): void {
+  try {
+    savePollLocal(data);
+    const encoded = encodePollToUrl(data);
+    if (encoded) {
+      router.push(`/?poll=${encoded}`);
+    }
+  } catch (e) {
+    // You could send error logs to Sentry etc.
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[PollData Sync Error]', e);
+    }
   }
 }
 
-// デバウンス制御を一元管理（型安全）しつつ副作用を完全制御
+/**
+ * Reusable debounce utility for any callback (with proper cleanup).
+ */
 function useDebouncedCallback(cb: () => void, delay = 500) {
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const timer = useRef<NodeJS.Timeout | null>(null);
+
   const cancel = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
   }, []);
+
   const schedule = useCallback(() => {
     cancel();
     timer.current = setTimeout(cb, delay);
   }, [cb, delay, cancel]);
+
   useEffect(() => cancel, [cancel]);
   return schedule;
 }
 
-// Pollデータ復元処理を抽出（テスト容易化・分岐一元化）
-function parsePollData(param: string | null): PollData | null {
+/**
+ * Safely parse PollData from url param. Returns null if decode or migrate fails.
+ * Extendable: can handle versioning, validation, etc.
+ */
+export function parsePollData(param: string | null): PollData | null {
   if (!param) return null;
   try {
     const decoded = decodePollFromUrl(param);
@@ -48,13 +65,21 @@ function parsePollData(param: string | null): PollData | null {
         dates: undefined,
       };
     }
+    // Add further validation if needed here
     return decoded;
-  } catch {
+  } catch (e) {
+    if (process.env.NODE_ENV === 'development') {
+      // i18n対応もしやすい（ログなどで日本語・英語切替も可）
+      console.warn('[Poll parse error]', e);
+    }
     return null;
   }
 }
 
-// 型定義をexportして拡張・テストしやすく
+/**
+ * Type for usePollData hook.
+ * Add callback hooks or version property for more extensibility.
+ */
 export interface UsePollData {
   pollData: PollData;
   mounted: boolean;
@@ -65,7 +90,6 @@ export interface UsePollData {
   getShareUrl: () => string;
 }
 
-// --- 本体フック ---
 export function usePollData(): UsePollData {
   const [pollData, setPollData] = useState<PollData>({
     title: '',
@@ -73,76 +97,92 @@ export function usePollData(): UsePollData {
     users: [],
   });
   const [mounted, setMounted] = useState(false);
+
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // 最新pollData参照用（副作用対応）
+  // Keep the latest pollData for debounce/callback
   const pollRef = useRef(pollData);
   pollRef.current = pollData;
 
-  // マウント判定（SSR対応・テスト用に分離）
+  // SSR compatibility
   useEffect(() => { setMounted(true); }, []);
 
-  // --- 初回ロード処理 ---
+  // Initial load from URL param (handles SSR hydration, migration, XSS, etc.)
   useEffect(() => {
-    const next = parsePollData(searchParams.get('poll'));
-    if (next) setPollData(next);
-    else if (searchParams.get('poll')) router.replace('/');
+    const param = searchParams.get('poll');
+    if (param) {
+      const loaded = parsePollData(param);
+      if (loaded) {
+        setPollData(loaded);
+      } else {
+        // 無効なURLパラメータの場合はクリア
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('Invalid poll parameter detected, clearing URL');
+        }
+        router.replace('/');
+      }
+    }
     // eslint-disable-next-line
   }, [searchParams, router]);
 
-  // --- URL/Storage 同期 ---
+  // Save poll data to storage and url after any changes (debounced)
   const syncExternal = useCallback(
     (data: PollData) => syncPollDataToExternal(data, router),
     [router]
   );
   const debouncedSync = useDebouncedCallback(() => syncExternal(pollRef.current), 500);
 
-  // --- 状態変更ハンドラ群 ---
-  // 変更後すぐstate更新、その後同期処理
+  // Update poll data and trigger save/debounce
   const updatePoll = useCallback((next: PollData) => {
     setPollData(next);
     debouncedSync();
   }, [debouncedSync]);
 
+  // Title update handler
   const handleTitleChange = useCallback((title: string) => {
     updatePoll({ ...pollRef.current, title });
   }, [updatePoll]);
 
+  // Candidate/time update handler
   const handleCandidatesChange = useCallback((candidates: DateTimeCandidate[]) => {
     const total = getTotalTimeSlots(candidates);
+    // Validate each user's answers: fill or trim to match slots
     const users = pollRef.current.users.map(u => ({
       ...u,
-      answers: u.answers.slice(0, total).concat(
-        Array(Math.max(0, total - u.answers.length)).fill('×')
-      )
+      answers: u.answers
+        .slice(0, total)
+        .concat(Array(Math.max(0, total - u.answers.length)).fill('×')),
     }));
     updatePoll({ ...pollRef.current, candidates, users });
   }, [updatePoll]);
 
+  // Register or update user's answers by name (trim/validate)
   const submitAnswer = useCallback((name: string, answers: Answer[]) => {
     const userName = name.trim();
     if (!userName) return;
+    // Optionally: sanitize answers ('○'|'×'以外を弾くなど)
+    const sanitizedAnswers = answers.map(a => (a === '○' ? '○' : '×'));
     const users = [...pollRef.current.users];
     const idx = users.findIndex(u => u.name === userName);
-    const user: User = { name: userName, answers: [...answers] };
+    const user: User = { name: userName, answers: [...sanitizedAnswers] };
     if (idx >= 0) users[idx] = user;
     else users.push(user);
     updatePoll({ ...pollRef.current, users });
   }, [updatePoll]);
 
+  // Admin-style answer toggle (for result table etc.)
   const toggleExistingAnswer = useCallback((userIdx: number, flatIdx: number) => {
     const users = pollRef.current.users.map((u, i) =>
       i !== userIdx ? u : {
         ...u,
-        answers: u.answers.map((a, j) =>
-          j === flatIdx ? (a === '○' ? '×' : '○') : a
-        )
+        answers: u.answers.map((a, j) => (j === flatIdx ? (a === '○' ? '×' : '○') : a)),
       }
     );
     updatePoll({ ...pollRef.current, users });
   }, [updatePoll]);
 
+  // Generate shareable url (SSR/CSR-safe)
   const getShareUrl = useCallback((): string => {
     if (!mounted) return '';
     try {
@@ -151,7 +191,10 @@ export function usePollData(): UsePollData {
       return typeof window !== 'undefined'
         ? `${window.location.origin}/?poll=${encoded}`
         : `/?poll=${encoded}`;
-    } catch {
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[ShareUrl error]', e);
+      }
       return '';
     }
   }, [mounted]);

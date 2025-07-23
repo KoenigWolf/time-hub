@@ -1,76 +1,92 @@
+// calendar-utils.ts
 import { CalendarDate, DateTimeCandidate, TimeSlot } from './types';
 
-// UUID生成の代替実装（ブラウザ対応）
-function generateId(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
+/**
+ * UUID生成（ブラウザ/Node両対応、安全・一意性重視）
+ * - 外部依存なし
+ * - 将来的に依存注入も可能な設計
+ */
+export function generateId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
   }
-  // フォールバック実装
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  // Fallback: 高速・十分な衝突回避
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = Math.random() * 16 | 0;
+    // eslint-disable-next-line no-mixed-operators
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
 }
 
 /**
- * 月のカレンダーデータを生成
+ * カレンダーの日付配列を生成
+ * - i18n対応: 曜日表示やロケール切替も拡張可能
+ * - 選択済み・今日・今月判定付き
  */
 export function generateCalendarDates(
   year: number,
   month: number,
   selectedDates: string[]
 ): CalendarDate[] {
-  const today = new Date().toISOString().slice(0, 10);
+  const todayStr = new Date().toISOString().slice(0, 10);
   const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const startDate = new Date(firstDay);
-  startDate.setDate(startDate.getDate() - firstDay.getDay()); // 週の最初から
+  // 日曜始まり（日本ロケール）
+  const weekStart = new Date(firstDay);
+  weekStart.setDate(firstDay.getDate() - firstDay.getDay());
 
   const dates: CalendarDate[] = [];
-  const current = new Date(startDate);
+  const d = new Date(weekStart);
 
-  // 6週間分（42日）を生成
   for (let i = 0; i < 42; i++) {
-    const dateStr = current.toISOString().slice(0, 10);
+    const dateStr = d.toISOString().slice(0, 10);
     dates.push({
       date: dateStr,
       isSelected: selectedDates.includes(dateStr),
-      isToday: dateStr === today,
-      isCurrentMonth: current.getMonth() === month,
+      isToday: dateStr === todayStr,
+      isCurrentMonth: d.getMonth() === month,
     });
-    current.setDate(current.getDate() + 1);
+    d.setDate(d.getDate() + 1);
   }
-
   return dates;
 }
 
 /**
- * 日付文字列をDate型に変換
+ * "yyyy-MM-dd"→Dateオブジェクト化
+ * - 形式異常時はInvalid Date返す
  */
 export function parseDate(dateStr: string): Date {
-  return new Date(dateStr + 'T00:00:00');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return new Date(NaN);
+  return new Date(`${dateStr}T00:00:00`);
 }
 
 /**
- * 月の表示名を取得
+ * 月表示名
+ * - i18n: ロケール/書式の引数化で他言語対応しやすい
  */
-export function getMonthName(year: number, month: number): string {
-  return new Date(year, month, 1).toLocaleDateString('ja-JP', {
-    year: 'numeric',
-    month: 'long',
-  });
+export function getMonthName(
+  year: number,
+  month: number,
+  locale = 'ja-JP',
+  options: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long' }
+): string {
+  return new Date(year, month, 1).toLocaleDateString(locale, options);
 }
 
 /**
- * 曜日の配列を取得
+ * 曜日名リスト
+ * - 拡張しやすく（en-USなど多言語配列も可）
  */
-export function getDayNames(): string[] {
-  return ['日', '月', '火', '水', '木', '金', '土'];
+export function getDayNames(locale = 'ja-JP'): string[] {
+  // 拡張例: new Intl.DateTimeFormat(locale, { weekday: 'short' }).format
+  return locale === 'ja-JP'
+    ? ['日', '月', '火', '水', '木', '金', '土']
+    : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 }
 
 /**
- * デフォルトの時間帯テンプレートを生成
+ * デフォルト時間帯テンプレート
+ * - 国際化やプリセット増減の拡張も容易
  */
 export function createDefaultTimeSlots(): TimeSlot[] {
   return [
@@ -90,59 +106,73 @@ export function createDefaultTimeSlots(): TimeSlot[] {
 }
 
 /**
- * 時間帯の表示文字列を生成
+ * 時間帯表示フォーマット
+ * - i18nを意識した構成（labelなければ時刻のみ）
  */
 export function formatTimeSlot(timeSlot: TimeSlot): string {
+  // 型安全
+  if (!timeSlot || typeof timeSlot !== 'object') return '';
   if (timeSlot.label) {
-    return `${timeSlot.label} (${timeSlot.startTime}-${timeSlot.endTime})`;
+    return `${timeSlot.label} (${timeSlot.startTime}〜${timeSlot.endTime})`;
   }
-  return `${timeSlot.startTime}-${timeSlot.endTime}`;
+  return `${timeSlot.startTime}〜${timeSlot.endTime}`;
 }
 
 /**
- * 候補日時をフラット配列に変換（回答用）
+ * DateTime候補をflat配列へ（回答データマッピング用）
+ * - 他用途にも使えるよう汎用的に
  */
 export function flattenCandidates(candidates: DateTimeCandidate[]): string[] {
   const flattened: string[] = [];
-  candidates.forEach((candidate, candidateIndex) => {
-    candidate.timeSlots.forEach((timeSlot, timeSlotIndex) => {
-      flattened.push(`${candidate.date}_${timeSlot.id}`);
-    });
-  });
+  candidates.forEach(candidate =>
+    candidate.timeSlots.forEach(slot =>
+      flattened.push(`${candidate.date}_${slot.id}`)
+    )
+  );
   return flattened;
 }
 
 /**
- * フラット配列のインデックスから候補日時のインデックスに変換
+ * 指定日時がflat配列で何番目か返す
+ * - パフォーマンス・テスト性も考慮
  */
 export function getFlattenedIndex(
   candidates: DateTimeCandidate[],
   candidateIndex: number,
   timeSlotIndex: number
 ): number {
-  let index = 0;
+  if (
+    !Array.isArray(candidates) ||
+    candidateIndex < 0 ||
+    timeSlotIndex < 0 ||
+    candidateIndex >= candidates.length ||
+    timeSlotIndex >= candidates[candidateIndex].timeSlots.length
+  ) return -1;
+  let idx = 0;
   for (let i = 0; i < candidateIndex; i++) {
-    index += candidates[i].timeSlots.length;
+    idx += candidates[i].timeSlots.length;
   }
-  return index + timeSlotIndex;
+  return idx + timeSlotIndex;
 }
 
 /**
- * フラット配列のインデックスから候補日時のインデックスを逆算
+ * flatIndex→候補日・時間帯の逆変換
+ * - 配列長・存在チェックで安全
  */
 export function getOriginalIndices(
   candidates: DateTimeCandidate[],
   flatIndex: number
 ): { candidateIndex: number; timeSlotIndex: number } | null {
-  let currentIndex = 0;
+  if (!Array.isArray(candidates) || flatIndex < 0) return null;
+  let cur = 0;
   for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
-    const candidate = candidates[candidateIndex];
-    for (let timeSlotIndex = 0; timeSlotIndex < candidate.timeSlots.length; timeSlotIndex++) {
-      if (currentIndex === flatIndex) {
+    const slots = candidates[candidateIndex].timeSlots;
+    for (let timeSlotIndex = 0; timeSlotIndex < slots.length; timeSlotIndex++) {
+      if (cur === flatIndex) {
         return { candidateIndex, timeSlotIndex };
       }
-      currentIndex++;
+      cur++;
     }
   }
   return null;
-} 
+}

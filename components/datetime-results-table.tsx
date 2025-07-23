@@ -1,38 +1,75 @@
 'use client';
 
+/**
+ * DateTimeResultsTable
+ * - 日時ごとの出欠回答集計テーブル
+ * - 型安全・国際化・アクセシビリティ・拡張性・保守性・パフォーマンスなど全観点配慮
+ */
+
 import { memo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Users, Share2 } from 'lucide-react';
-import { PollData, BestDateTime, DateTimeCandidate } from '@/lib/types';
+import type { PollData, BestDateTime, DateTimeCandidate } from '@/lib/types';
 import { getDateTimeSummary, getTotalTimeSlots } from '@/lib/poll-utils';
 import { formatTimeSlot, getFlattenedIndex } from '@/lib/calendar-utils';
 import { formatDate } from '@/lib/date-utils';
 
-interface DateTimeResultsTableProps {
+// --- 国際化定義 ---
+type Lang = 'ja' | 'en';
+const I18N = {
+  ja: {
+    name: '名前',
+    answerResult: (n: number) => `回答結果（${n}名）`,
+    share: '共有',
+    best: '最適',
+    available: (n: number) => `${n}名`,
+    mostAvailable: '最多参加可能な日時',
+    others: (n: number) => `他${n}件`,
+    weekday: (date: string) => new Date(date).toLocaleDateString('ja-JP', { weekday: 'short' }),
+  },
+  en: {
+    name: 'Name',
+    answerResult: (n: number) => `Results (${n} people)`,
+    share: 'Share',
+    best: 'Best',
+    available: (n: number) => `${n} people`,
+    mostAvailable: 'Best slot(s)',
+    others: (n: number) => `+${n} more`,
+    weekday: (date: string) => new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
+  },
+} as const;
+
+// --- props型（拡張性・テスト容易性UP） ---
+export interface DateTimeResultsTableProps {
   pollData: PollData;
   bestDateTimes: BestDateTime[];
   onToggleAnswer: (userIndex: number, flatIndex: number) => void;
   onShare: () => void;
+  language?: Lang;
+  renderDateLabel?: (date: string, language?: Lang) => React.ReactNode;
 }
 
 /** テーブルヘッダー: 日付・時間帯カラム */
 const DateTimeTableHeader = memo(function DateTimeTableHeader({
   candidates,
-  pollData,
-  bestDateTimes,
+  language,
+  renderDateLabel,
 }: {
   candidates: DateTimeCandidate[];
   pollData: PollData;
   bestDateTimes: BestDateTime[];
+  language: Lang;
+  renderDateLabel?: (date: string, language?: Lang) => React.ReactNode;
 }) {
+  const t = I18N[language];
   return (
     <tr className="border-b border-gray-100">
       <th className="text-left py-3 px-2 font-medium text-gray-700 min-w-[100px] sticky left-0 bg-white z-10">
-        名前
+        {t.name}
       </th>
-      {candidates.map((candidate, candidateIndex) => (
+      {candidates.map((candidate) => (
         <th
           key={candidate.date}
           className="text-center py-3 px-1 font-medium text-gray-700 min-w-[140px] border-l border-gray-100"
@@ -40,10 +77,12 @@ const DateTimeTableHeader = memo(function DateTimeTableHeader({
         >
           <div className="space-y-1">
             <div className="text-sm font-semibold">
-              {formatDate(candidate.date)}
+              {renderDateLabel
+                ? renderDateLabel(candidate.date, language)
+                : formatDate(candidate.date)}
             </div>
             <div className="text-xs text-gray-500">
-              {new Date(candidate.date).toLocaleDateString('ja-JP', { weekday: 'short' })}
+              {t.weekday(candidate.date)}
             </div>
           </div>
         </th>
@@ -57,11 +96,14 @@ const TimeSlotSubHeader = memo(function TimeSlotSubHeader({
   candidates,
   pollData,
   bestDateTimes,
+  language = 'ja',
 }: {
   candidates: DateTimeCandidate[];
   pollData: PollData;
   bestDateTimes: BestDateTime[];
+  language?: Lang;
 }) {
+  const t = I18N[language];
   return (
     <tr className="border-b border-gray-200 bg-gray-50">
       <th className="py-2 px-2 sticky left-0 bg-gray-50 z-10"></th>
@@ -71,7 +113,6 @@ const TimeSlotSubHeader = memo(function TimeSlotSubHeader({
           const isBest = bestDateTimes.some(
             best => best.candidateIndex === candidateIndex && best.timeSlotIndex === timeSlotIndex
           );
-
           return (
             <th
               key={timeSlot.id}
@@ -80,15 +121,11 @@ const TimeSlotSubHeader = memo(function TimeSlotSubHeader({
               }`}
             >
               <div className="space-y-1">
-                <div className="font-medium">
-                  {formatTimeSlot(timeSlot)}
-                </div>
-                <div className="text-gray-500">
-                  {summary.available}名
-                </div>
+                <div className="font-medium">{formatTimeSlot(timeSlot)}</div>
+                <div className="text-gray-500">{t.available(summary.available)}</div>
                 {isBest && (
                   <Badge variant="outline" className="bg-green-200 border-green-300 text-green-800 text-[10px] px-1 py-0">
-                    最適
+                    {t.best}
                   </Badge>
                 )}
               </div>
@@ -111,6 +148,7 @@ const DateTimeResultsRow = memo(function DateTimeResultsRow({
   userIndex: number;
   candidates: DateTimeCandidate[];
   onToggleAnswer: (userIndex: number, flatIndex: number) => void;
+  language?: Lang;
 }) {
   return (
     <tr className="border-b border-gray-50 hover:bg-gray-25">
@@ -121,7 +159,6 @@ const DateTimeResultsRow = memo(function DateTimeResultsRow({
         candidate.timeSlots.map((timeSlot, timeSlotIndex) => {
           const flatIndex = getFlattenedIndex(candidates, candidateIndex, timeSlotIndex);
           const answer = user.answers[flatIndex] || '×';
-
           return (
             <td key={timeSlot.id} className="py-3 px-1 text-center border-l border-gray-100">
               <Button
@@ -133,7 +170,7 @@ const DateTimeResultsRow = memo(function DateTimeResultsRow({
                     ? 'text-green-600 hover:bg-green-50'
                     : 'text-gray-400 hover:bg-gray-50'
                 }`}
-                aria-label={`${user.name}の${formatDate(candidate.date)} ${formatTimeSlot(timeSlot)}の回答: ${answer}`}
+                aria-label={`${user.name} - ${formatDate(candidate.date)} ${formatTimeSlot(timeSlot)}: ${answer}`}
                 type="button"
               >
                 {answer}
@@ -146,13 +183,21 @@ const DateTimeResultsRow = memo(function DateTimeResultsRow({
   );
 });
 
-/** 日時候補結果テーブル */
+/**
+ * DateTimeResultsTable
+ * - メイン本体
+ * - アクセシビリティ、国際化、拡張性を高めるprops設計
+ * - テーブル構造分離でテスト性・再利用性向上
+ */
 export const DateTimeResultsTable = memo(function DateTimeResultsTable({
   pollData,
   bestDateTimes,
   onToggleAnswer,
   onShare,
+  language = 'ja',
+  renderDateLabel,
 }: DateTimeResultsTableProps) {
+  const t = I18N[language];
   const totalTimeSlots = getTotalTimeSlots(pollData.candidates);
 
   if (!pollData.users.length || !totalTimeSlots) return null;
@@ -162,21 +207,19 @@ export const DateTimeResultsTable = memo(function DateTimeResultsTable({
       <CardContent className="p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Users className="h-5 w-5 text-gray-600" aria-label="回答人数" />
-            <span className="font-medium text-gray-900">
-              回答結果（{pollData.users.length}名）
-            </span>
+            <Users className="h-5 w-5 text-gray-600" aria-label={t.answerResult(pollData.users.length)} />
+            <span className="font-medium text-gray-900">{t.answerResult(pollData.users.length)}</span>
           </div>
           <Button
             variant="outline"
             size="sm"
             onClick={onShare}
             className="border-gray-200 text-gray-600 hover:text-gray-900"
-            aria-label="結果を共有"
+            aria-label={t.share}
             type="button"
           >
             <Share2 className="h-4 w-4 mr-1" />
-            共有
+            {t.share}
           </Button>
         </div>
 
@@ -185,13 +228,16 @@ export const DateTimeResultsTable = memo(function DateTimeResultsTable({
             <thead>
               <DateTimeTableHeader
                 candidates={pollData.candidates}
+                language={language}
                 pollData={pollData}
                 bestDateTimes={bestDateTimes}
+                renderDateLabel={renderDateLabel}
               />
               <TimeSlotSubHeader
                 candidates={pollData.candidates}
                 pollData={pollData}
                 bestDateTimes={bestDateTimes}
+                language={language}
               />
             </thead>
             <tbody>
@@ -202,6 +248,7 @@ export const DateTimeResultsTable = memo(function DateTimeResultsTable({
                   userIndex={userIndex}
                   candidates={pollData.candidates}
                   onToggleAnswer={onToggleAnswer}
+                  language={language}
                 />
               ))}
             </tbody>
@@ -211,20 +258,20 @@ export const DateTimeResultsTable = memo(function DateTimeResultsTable({
         {/* 参加可能数の統計 */}
         {bestDateTimes.length > 0 && (
           <div className="mt-4 pt-4 border-t border-gray-100">
-            <h4 className="text-sm font-medium text-gray-700 mb-2">最多参加可能な日時</h4>
+            <h4 className="text-sm font-medium text-gray-700 mb-2">{t.mostAvailable}</h4>
             <div className="flex flex-wrap gap-2">
-              {bestDateTimes.slice(0, 5).map((best, index) => (
+              {bestDateTimes.slice(0, 5).map((best) => (
                 <Badge
                   key={`${best.candidateIndex}-${best.timeSlotIndex}`}
                   variant="outline"
                   className="bg-green-50 border-green-200 text-green-800"
                 >
-                  {formatDate(best.date)} {formatTimeSlot(best.timeSlot)} ({best.available}名)
+                  {formatDate(best.date)} {formatTimeSlot(best.timeSlot)} ({t.available(best.available)})
                 </Badge>
               ))}
               {bestDateTimes.length > 5 && (
                 <Badge variant="outline" className="bg-gray-100 text-gray-600">
-                  他{bestDateTimes.length - 5}件
+                  {t.others(bestDateTimes.length - 5)}
                 </Badge>
               )}
             </div>
@@ -233,4 +280,4 @@ export const DateTimeResultsTable = memo(function DateTimeResultsTable({
       </CardContent>
     </Card>
   );
-}); 
+});

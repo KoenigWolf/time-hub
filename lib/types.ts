@@ -52,3 +52,9 @@ export interface CalendarDate {
   isToday: boolean;
   isCurrentMonth: boolean;
 }
+
+/** 最適な候補日（日付のみの集計） */
+export interface BestDate {
+  index: number;
+  available: number;
+}

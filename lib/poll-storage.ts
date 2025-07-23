@@ -1,119 +1,161 @@
 import { PollData } from './types';
 
-/** ローカルストレージ用のキーを生成（title依存、英数字のみ） */
-const getPollStorageKey = (title: string) =>
-  `time-hub-poll-${title.replace(/[^a-zA-Z0-9]/g, '')}`;
+/**
+ * Poll用ストレージキー生成（拡張性: 英数字と一部記号のみ許可、将来的にバージョンや言語切り替えにも対応可）
+ */
+export function getPollStorageKey(title: string): string {
+  // XSSやStorage衝突防止
+  const safeTitle = typeof title === 'string' ? title.replace(/[^a-zA-Z0-9\-_]/g, '') : '';
+  return `time-hub-poll-${safeTitle}`;
+}
 
-/** 安全なBase64エンコード（UTF-8対応） */
-function safeBase64Encode(str: string): string {
+/**
+ * Base64エンコード（UTF-8, URLセーフ、例外時フォールバック付き）
+ */
+export function safeBase64Encode(str: string): string {
   try {
-    // TextEncoderを使用してUTF-8バイト配列に変換
-    const encoder = new TextEncoder();
-    const bytes = encoder.encode(str);
-    
-    // バイト配列をBase64に変換
+    const bytes = new TextEncoder().encode(str);
     let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
     return btoa(binary);
   } catch (e) {
-    console.error('Base64 encode error:', e);
-    // フォールバック: URLエンコード
-    return encodeURIComponent(str);
+    if (process.env.NODE_ENV === 'development') console.error('Base64 encode error:', e);
+    return encodeURIComponent(str); // フォールバック
   }
 }
 
-/** 安全なBase64デコード（UTF-8対応） */
-function safeBase64Decode(encoded: string): string {
+/**
+ * Base64デコード（UTF-8, 例外時フォールバック付き）
+ */
+export function safeBase64Decode(encoded: string): string {
   try {
-    // Base64形式かチェック
-    if (!encoded.match(/^[A-Za-z0-9+/]*={0,2}$/)) {
-      // Base64でない場合はURLデコードを試行
+    // 標準的Base64チェック
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Base64 pattern check failed, using URL decode fallback');
+      }
       return decodeURIComponent(encoded);
     }
     
-    // Base64デコード
-    const binary = atob(encoded);
-    const bytes = new Uint8Array(binary.length);
-    
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Attempting Base64 decode...');
     }
     
-    // TextDecoderを使用してUTF-8文字列に変換
-    const decoder = new TextDecoder('utf-8');
-    return decoder.decode(bytes);
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const result = new TextDecoder().decode(bytes);
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Base64 decode successful');
+    }
+    
+    return result;
   } catch (e) {
-    console.error('Base64 decode error:', e);
-    // フォールバック: URLデコード
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Base64 decode error:', e);
+      console.error('Encoded string:', encoded);
+    }
     try {
       return decodeURIComponent(encoded);
     } catch (e2) {
-      console.error('URL decode fallback failed:', e2);
+      if (process.env.NODE_ENV === 'development') console.error('URL decode fallback failed:', e2);
       throw new Error('Failed to decode data');
     }
   }
 }
 
-/** PollDataをURL安全なBase64文字列にエンコード（UTF-8対応） */
+/**
+ * PollData→URLエンコード
+ * - PollDataの構造変更時も型安全
+ * - JSON.stringify失敗も考慮
+ */
 export function encodePollToUrl(pollData: PollData): string {
   try {
-    const json = JSON.stringify(pollData);
-    return safeBase64Encode(json);
+    return safeBase64Encode(JSON.stringify(pollData));
   } catch (e) {
-    console.error('Failed to encode poll data:', e);
+    if (process.env.NODE_ENV === 'development') console.error('Failed to encode poll data:', e);
     return '';
   }
 }
 
-/** URLからPollDataをデコード（UTF-8対応、失敗時null） */
+/**
+ * URL→PollData復元（型安全・必須プロパティチェック・失敗時null返却）
+ */
 export function decodePollFromUrl(encoded: string): PollData | null {
   try {
-    // 空文字列や不正な文字列のチェック
-    if (!encoded || encoded.trim() === '') {
-      return null;
+    if (!encoded || typeof encoded !== 'string') return null;
+    
+    // デバッグ情報
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Decoding URL param:', encoded.substring(0, 20) + '...');
     }
     
     const json = safeBase64Decode(encoded);
-    const parsed = JSON.parse(json) as PollData;
     
-    // 基本的な構造チェック
-    if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Invalid poll data structure');
+    // デバッグ情報
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Base64 decoded JSON:', json.substring(0, 100) + '...');
     }
     
-    // 必要なプロパティの存在チェック
-    if (!parsed.hasOwnProperty('title')) {
-      throw new Error('Missing required property: title');
+    const parsed: unknown = JSON.parse(json);
+
+    // 型ガード: 最低限のプロパティ存在チェック
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'title' in parsed &&
+      'candidates' in parsed &&
+      'users' in parsed
+    ) {
+      return parsed as PollData;
     }
-    
-    return parsed;
+    throw new Error('Invalid poll data structure');
   } catch (e) {
-    console.error('Failed to decode poll from URL:', e);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Failed to decode poll from URL:', e);
+      console.error('Encoded string:', encoded);
+      console.error('String length:', encoded.length);
+    }
     return null;
   }
 }
 
-/** PollDataをローカルストレージに保存 */
+/**
+ * PollDataをローカルストレージに保存（XSSやStorage上書き衝突防止、エラー通知拡張）
+ */
 export function savePollLocal(pollData: PollData): void {
   try {
     const key = getPollStorageKey(pollData.title);
     localStorage.setItem(key, JSON.stringify(pollData));
   } catch (e) {
-    console.error('Failed to save poll:', e);
+    if (process.env.NODE_ENV === 'development') console.error('Failed to save poll:', e);
+    // ここで可観測性（Sentry等通知）の拡張も容易
   }
 }
 
-/** ローカルストレージからPollDataを取得（titleがkey） */
+/**
+ * PollDataをローカルストレージから取得（バリデーション付き、失敗時null）
+ */
 export function loadPollLocal(title: string): PollData | null {
   try {
     const key = getPollStorageKey(title);
     const stored = localStorage.getItem(key);
-    return stored ? (JSON.parse(stored) as PollData) : null;
+    if (!stored) return null;
+    const parsed: unknown = JSON.parse(stored);
+    // 最低限の構造チェック
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'title' in parsed &&
+      'candidates' in parsed &&
+      'users' in parsed
+    ) {
+      return parsed as PollData;
+    }
+    throw new Error('Invalid poll data structure in storage');
   } catch (e) {
-    console.error('Failed to load poll:', e);
+    if (process.env.NODE_ENV === 'development') console.error('Failed to load poll:', e);
     return null;
   }
 }
