@@ -17,7 +17,7 @@ const messages = {
  * - memo化しパフォーマンス向上
  * - テスト容易・再利用可
  */
-export const LoadingFallback = memo(function LoadingFallback() {
+const LoadingFallback = memo(function LoadingFallback() {
   return (
     <section
       aria-label="Loading"
